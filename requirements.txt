@@ -1,0 +1,7 @@
+requests
+beautifulsoup4
+customtkinter
+arabic-reshaper
+python-bidi
+tqdm
+pillow
