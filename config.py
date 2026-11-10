@@ -5,7 +5,7 @@ import json
 
 APP_NAME = "Waraqat | ورقات"
 APP_SUBTITLE = "المنظومة الذكية لسحب وتنزيل المستندات والكتب"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 
 DEFAULT_MAX_WORKERS = 5
 TIMEOUT = 60
@@ -26,7 +26,10 @@ def load_settings():
     defaults = {
         "save_path": default_dir,
         "max_workers": DEFAULT_MAX_WORKERS,
-        "include_docs": True
+        "theme": "Dark",
+        "open_folder_on_finish": True,
+        "auto_check_updates": True,
+        "timeout": 60
     }
     if os.path.exists(SETTINGS_FILE):
         try:
