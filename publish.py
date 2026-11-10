@@ -102,7 +102,8 @@ def main():
         '--icon=assets\\waraqat_icon.ico --name=Waraqat '
         '--add-data "assets;assets" '
         '--collect-all customtkinter '
-        '--collect-all arabic_reshaper main.py'
+        '--collect-all arabic_reshaper '
+        '--collect-all plyer main.py'
     )
     print("Building executable (this may take 20-30 seconds)...")
     run_cmd(build_cmd, "PyInstaller build failed")

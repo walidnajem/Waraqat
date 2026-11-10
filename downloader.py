@@ -136,9 +136,10 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
     Downloads a single file item with automatic retry mechanism (3 attempts)
     and duplicate skipping.
     """
+    file_idx = item.get("orig_index", index)
     if cancel_event and cancel_event.is_set():
         if item_callback:
-            item_callback(index, "cancelled", 0.0)
+            item_callback(file_idx, "cancelled", 0.0)
         return "cancelled"
 
     raw_type = item.get("type", "PDF").upper()
@@ -155,24 +156,24 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
         if log_callback:
             log_callback(f"[SKIP] (Already exists) -> {filename}")
         if item_callback:
-            item_callback(index, "skip", 100.0)
+            item_callback(file_idx, "skip", 100.0)
         return "skip"
 
     if log_callback:
         log_callback(f"[DOWNLOAD] [{index}/{total}] -> {filename}")
     if item_callback:
-        item_callback(index, "downloading", 0.0)
+        item_callback(file_idx, "downloading", 0.0)
 
     def _chunk_cb(pct, downloaded, total_b):
         if item_callback:
-            item_callback(index, "progress", pct)
+            item_callback(file_idx, "progress", pct)
 
     for attempt in range(3):
         if cancel_event and cancel_event.is_set():
             if os.path.exists(filepath):
                 os.remove(filepath)
             if item_callback:
-                item_callback(index, "cancelled", 0.0)
+                item_callback(file_idx, "cancelled", 0.0)
             return "cancelled"
 
         try:
@@ -189,13 +190,13 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
             if log_callback:
                 log_callback(f"[OK] {filename} ({size_mb} MB at {speed_mb} MB/s)")
             if item_callback:
-                item_callback(index, "success", 100.0)
+                item_callback(file_idx, "success", 100.0)
             return "success"
 
         except Exception as e:
             if "cancelled" in str(e).lower():
                 if item_callback:
-                    item_callback(index, "cancelled", 0.0)
+                    item_callback(file_idx, "cancelled", 0.0)
                 return "cancelled"
 
             if os.path.exists(filepath):
@@ -208,13 +209,13 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
                 if log_callback:
                     log_callback(f"[RETRY] ({attempt + 1}/3) -> {filename}")
                 if item_callback:
-                    item_callback(index, "retry", 0.0)
+                    item_callback(file_idx, "retry", 0.0)
                 time.sleep(2)
             else:
                 if log_callback:
                     log_callback(f"[FAILED] {filename} ({str(e)})")
                 if item_callback:
-                    item_callback(index, "failed", 0.0)
+                    item_callback(file_idx, "failed", 0.0)
 
     return "failed"
 

@@ -20,6 +20,7 @@ from site_detector import detect_site
 from extractor import extract_files, extract_files_batch
 from downloader import download_parallel
 from utils import clean_filename
+from notifications import notify_download_complete, notify_error
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -39,6 +40,9 @@ TYPE_COLORS = {
     "PPTX": "#EA580C",      # Orange
     "PPT": "#EA580C",       # Orange
     "EPUB": "#9333EA",      # Purple
+    "MEGA": "#D32F2F",      # Red (Mega brand)
+    "DJVU": "#795548",      # Brown
+    "ARCHIVE": "#FF6F00",   # Orange (Archive.org brand)
 }
 
 
@@ -279,8 +283,8 @@ class SettingsModal(ctk.CTkToplevel):
         self._on_save = on_save
 
         self.title("الإعدادات | Settings")
-        self.geometry("540x530")
-        self.minsize(500, 480)
+        self.geometry("540x560")
+        self.minsize(500, 520)
         self.resizable(False, False)
 
         # Set window icon
@@ -304,7 +308,7 @@ class SettingsModal(ctk.CTkToplevel):
             ph = self.parent.winfo_height()
             px = self.parent.winfo_rootx()
             py = self.parent.winfo_rooty()
-            w, h = 540, 530
+            w, h = 540, 560
             x = px + (pw - w) // 2
             y = py + (ph - h) // 2
             self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
@@ -463,7 +467,18 @@ class SettingsModal(ctk.CTkToplevel):
             fg_color="#4F46E5",
             hover_color="#4338CA"
         )
-        cb_update.pack(anchor="w")
+        cb_update.pack(anchor="w", pady=(0, 4))
+
+        self.var_notifications = ctk.BooleanVar(value=self._settings.get("notifications_enabled", True))
+        cb_notify = ctk.CTkCheckBox(
+            sec4,
+            text="تفعيل إشعارات الويندوز (Toast Notifications) عند اكتمال التنزيل",
+            variable=self.var_notifications,
+            font=("Segoe UI", 11),
+            fg_color="#4F46E5",
+            hover_color="#4338CA"
+        )
+        cb_notify.pack(anchor="w")
 
         # --- Bottom Action Buttons ---
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -518,6 +533,7 @@ class SettingsModal(ctk.CTkToplevel):
         # Automation
         self._settings["open_folder_on_finish"] = self.var_open_folder.get()
         self._settings["auto_check_updates"] = self.var_auto_update.get()
+        self._settings["notifications_enabled"] = self.var_notifications.get()
 
         self._on_save(self._settings)
         self.destroy()
@@ -684,7 +700,13 @@ class App(ctk.CTk):
         self.icon_moon = load_icon_image("moon", (18, 18))
 
         self.download_item_widgets = {}  # Map index -> DownloadItem widget
+        self.file_vars = {}  # Map 0-based orig_idx -> BooleanVar
+        self._displayed_indices = []  # List of visible 0-based indices
 
+        # Filter state
+        self.filter_entry = None  # Set in build_ui
+        self.active_type_filters = set()  # empty = all types
+        self.type_filter_buttons = {}  # type_name -> button widget
 
         self.build_ui()
         # بعد بناء الواجهة، نستدعي فحص التحديثات تلقائيًا
@@ -1063,6 +1085,51 @@ class App(ctk.CTk):
         )
         self.btn_select_all.pack(side="right")
 
+        # ----------------------------------
+        # Filter Bar (search + type pill toggles)
+        # ----------------------------------
+        filter_bar = ctk.CTkFrame(list_container, fg_color="transparent")
+        filter_bar.pack(fill="x", padx=12, pady=(2, 4))
+
+        self.filter_entry = ctk.CTkEntry(
+            filter_bar,
+            placeholder_text="Search files... | بحث في الملفات...",
+            width=260,
+            height=30,
+            font=("Segoe UI", 11),
+            fg_color=("white", "#12151C"),
+            border_color=("gray70", "#334155"),
+            text_color=("gray10", "#F1F5F9"),
+            placeholder_text_color=("gray50", "#64748B"),
+            corner_radius=6
+        )
+        self.filter_entry.pack(side="left", padx=(0, 10))
+        self.filter_entry.bind("<KeyRelease>", self.filter_files)
+
+        # Type pill toggle buttons
+        pill_types = [("All | الكل", "ALL"), ("PDF", "PDF"), ("DOCX", "DOCX"),
+                      ("PPTX", "PPTX"), ("GDRIVE", "GDRIVE"), ("EPUB", "EPUB")]
+        inactive_fg = ("gray75", "#334155")
+        inactive_hover = ("gray65", "#475569")
+        inactive_text = ("gray10", "white")
+
+        self.type_filter_buttons = {}
+        for label, type_key in pill_types:
+            btn = ctk.CTkButton(
+                filter_bar,
+                text=label,
+                width=60 if type_key != "ALL" else 75,
+                height=26,
+                font=("Segoe UI", 10, "bold"),
+                fg_color=inactive_fg,
+                hover_color=inactive_hover,
+                text_color=inactive_text,
+                corner_radius=12,
+                command=lambda tk=type_key: self._toggle_type_filter(tk)
+            )
+            btn.pack(side="left", padx=2)
+            self.type_filter_buttons[type_key] = btn
+
         self.scroll_files_frame = ctk.CTkScrollableFrame(list_container, height=220, fg_color=("white", "#12151C"))
         self.scroll_files_frame.pack(fill="x", padx=10, pady=(0, 10))
 
@@ -1208,6 +1275,14 @@ class App(ctk.CTk):
 
         self.checkbox_vars = []
         self.download_item_widgets = {}
+        self.file_vars = {i: ctk.BooleanVar(value=True) for i in range(len(files))}
+        self._displayed_indices = list(range(len(files)))
+
+        # Reset filter bar
+        if self.filter_entry is not None:
+            self.filter_entry.delete(0, "end")
+        self.active_type_filters = set()
+        self._refresh_pill_styles()
 
         if not files:
             lbl = ctk.CTkLabel(
@@ -1219,12 +1294,104 @@ class App(ctk.CTk):
             return
 
         for i, item in enumerate(files, start=1):
-            var = ctk.BooleanVar(value=True)
+            var = self.file_vars[i - 1]
             self.checkbox_vars.append(var)
 
             # Create interactive DownloadItem widget
             item_widget = DownloadItem(self.scroll_files_frame, i, item, var)
             self.download_item_widgets[i] = item_widget
+
+    def _toggle_type_filter(self, type_key):
+        """Toggle a type filter pill. 'ALL' clears all filters."""
+        if type_key == "ALL":
+            self.active_type_filters = set()
+        else:
+            if type_key in self.active_type_filters:
+                self.active_type_filters.discard(type_key)
+            else:
+                self.active_type_filters.add(type_key)
+        self._refresh_pill_styles()
+        self.filter_files()
+
+    def _refresh_pill_styles(self):
+        """Update pill button colors based on active_type_filters."""
+        inactive_fg = ("gray75", "#334155")
+        inactive_text = ("gray10", "white")
+        for type_key, btn in self.type_filter_buttons.items():
+            if type_key == "ALL":
+                if not self.active_type_filters:
+                    btn.configure(fg_color="#4F46E5", text_color="#FFFFFF")
+                else:
+                    btn.configure(fg_color=inactive_fg, text_color=inactive_text)
+            else:
+                if type_key in self.active_type_filters:
+                    color = TYPE_COLORS.get(type_key, "#475569")
+                    btn.configure(fg_color=color, text_color="#FFFFFF")
+                else:
+                    btn.configure(fg_color=inactive_fg, text_color=inactive_text)
+
+    def filter_files(self, event=None):
+        """Filter self.files by search text and active type filters, then redraw."""
+        if not self.files:
+            return
+
+        search_text = ""
+        if self.filter_entry is not None:
+            search_text = self.filter_entry.get().strip().lower()
+
+        filtered = []
+        for i, item in enumerate(self.files):
+            title = item.get("title", "").lower()
+            file_type = item.get("type", "").upper()
+
+            # Text match
+            if search_text and search_text not in title:
+                continue
+
+            # Type match
+            if self.active_type_filters and file_type not in self.active_type_filters:
+                continue
+
+            filtered.append((i, item))  # Keep original 0-based index
+
+        self.update_file_checklist_filtered(filtered)
+
+    def update_file_checklist_filtered(self, filtered_files):
+        """Redraw only filtered items, preserving self.files and using original indices."""
+        for widget in self.scroll_files_frame.winfo_children():
+            widget.destroy()
+
+        self.checkbox_vars = []
+        self.download_item_widgets = {}
+        self._displayed_indices = [orig_idx_0 for orig_idx_0, _ in filtered_files]
+
+        total = len(self.files)
+        shown = len(filtered_files)
+
+        if shown < total:
+            self.files_label.configure(text=f"Files | الملفات المكتشفة: {shown}/{total}")
+        else:
+            self.files_label.configure(text=f"Files | الملفات المكتشفة: {total}")
+
+        if not filtered_files:
+            lbl = ctk.CTkLabel(
+                self.scroll_files_frame,
+                text="No matching files. | لا توجد ملفات مطابقة.",
+                text_color="#64748B"
+            )
+            lbl.pack(pady=20)
+            return
+
+        for orig_idx_0, item in filtered_files:
+            orig_idx_1 = orig_idx_0 + 1  # 1-based index as used by DownloadItem
+            var = self.file_vars.get(orig_idx_0)
+            if var is None:
+                var = ctk.BooleanVar(value=True)
+                self.file_vars[orig_idx_0] = var
+            self.checkbox_vars.append(var)
+
+            item_widget = DownloadItem(self.scroll_files_frame, orig_idx_1, item, var)
+            self.download_item_widgets[orig_idx_1] = item_widget
 
     def select_all_files(self):
         for var in self.checkbox_vars:
@@ -1380,10 +1547,13 @@ class App(ctk.CTk):
             self.log("[!] Please scan URLs first before downloading.")
             return
 
-        selected_files = [
-            item for item, var in zip(self.files, self.checkbox_vars)
-            if var.get()
-        ]
+        selected_files = []
+        for idx in self._displayed_indices:
+            var = self.file_vars.get(idx)
+            if var and var.get():
+                item_copy = dict(self.files[idx])
+                item_copy["orig_index"] = idx + 1
+                selected_files.append(item_copy)
 
         if not selected_files:
             self.log("[!] No files selected! Check at least one file from the checklist.")
@@ -1453,6 +1623,13 @@ class App(ctk.CTk):
                 self.log("[+] Click 'Open | فتح' to view your downloaded files.")
                 self.log("=" * 50)
 
+                # Toast notification on completion
+                if self.settings.get("notifications_enabled", True):
+                    notify_download_complete(
+                        "ورقات | Waraqat",
+                        f"تم تحميل {result.get('success', 0)} ملف بنجاح إلى {target_folder}"
+                    )
+
                 # Auto-open folder if enabled in settings
                 if self.settings.get("open_folder_on_finish", True):
                     try:
@@ -1462,6 +1639,8 @@ class App(ctk.CTk):
 
         except Exception as e:
             self.log(f"[ERROR] Download worker error: {str(e)}")
+            if self.settings.get("notifications_enabled", True):
+                notify_error("ورقات | Waraqat", str(e))
         finally:
             self.event_queue.put({"type": "download_done"})
 

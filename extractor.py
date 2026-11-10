@@ -28,7 +28,7 @@ SOCIAL_DOMAINS = [
     "instagram.com", "youtube.com"
 ]
 
-DOC_EXTENSIONS = (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".epub")
+DOC_EXTENSIONS = (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".epub", ".djvu")
 
 
 def _extract_filename_from_cd(content_disposition):
@@ -115,6 +115,74 @@ def _clean_title(raw_text, fallback_name=""):
     return ""
 
 
+def _extract_archive_org(url):
+    """Extracts downloadable files (PDF, EPUB, DJVU, DOC, DOCX) from an Archive.org item."""
+    parsed = urllib.parse.urlparse(url)
+    path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+
+    # Convert /details/ID to /download/ID/
+    if len(path_parts) >= 2 and path_parts[0] == "details":
+        item_id = path_parts[1]
+    elif len(path_parts) >= 2 and path_parts[0] == "download":
+        item_id = path_parts[1]
+    else:
+        item_id = path_parts[-1] if path_parts else ""
+
+    if not item_id:
+        return []
+
+    download_page_url = f"https://archive.org/download/{item_id}/"
+
+    try:
+        response = requests.get(download_page_url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+    except Exception:
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    target_extensions = (".pdf", ".epub", ".djvu", ".doc", ".docx")
+    files = []
+    seen = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:")):
+            continue
+
+        href_lower = href.lower()
+        matched_ext = None
+        for ext in target_extensions:
+            if href_lower.endswith(ext):
+                matched_ext = ext
+                break
+
+        if not matched_ext:
+            continue
+
+        abs_url = urllib.parse.urljoin(download_page_url, href)
+        if abs_url in seen:
+            continue
+        seen.add(abs_url)
+
+        filename = os.path.basename(urllib.parse.unquote(urllib.parse.urlparse(abs_url).path))
+        title = filename
+        for ext in target_extensions:
+            if title.lower().endswith(ext):
+                title = title[:-len(ext)]
+                break
+        title = clean_filename(title) or filename
+
+        file_type = matched_ext.lstrip(".").upper()
+
+        files.append({
+            "type": file_type,
+            "url": abs_url,
+            "title": title
+        })
+
+    return files
+
+
 def resolve_mediafire(url):
     """Resolves a MediaFire download page to its direct file link."""
     try:
@@ -175,6 +243,38 @@ def extract_files(url, extractor_type=None):
             "url": url,
             "title": "Google_Drive_Document"
         }]
+
+    # -------------------------------------------------------------
+    # CASE 4: Archive.org (Internet Archive)
+    # -------------------------------------------------------------
+    if "archive.org" in parsed_input.netloc.lower():
+        return _extract_archive_org(url)
+
+    # -------------------------------------------------------------
+    # CASE 5: Mega.nz — encrypted, needs special SDK
+    # -------------------------------------------------------------
+    if "mega.nz" in parsed_input.netloc.lower() or "mega.co.nz" in parsed_input.netloc.lower():
+        return [{
+            "type": "MEGA",
+            "url": url,
+            "title": "Mega.nz_File (يتطلب دعم خاص)"
+        }]
+
+    # -------------------------------------------------------------
+    # CASE 6: AlManahij (almanahj.com)
+    # almanahj uses direct PDF download links, universal extractor works
+    # but we enhance title extraction from their specific HTML structure
+    # -------------------------------------------------------------
+    # if "almanahj.com" in parsed_input.netloc.lower():
+    #     pass  # Falls through to universal extractor with enhanced title detection
+
+    # -------------------------------------------------------------
+    # CASE 7: Alloschool (alloschool.com)
+    # Moroccan educational platform — pages contain embedded PDFs and
+    # download links. The universal extractor handles it well.
+    # -------------------------------------------------------------
+    # if "alloschool.com" in parsed_input.netloc.lower():
+    #     pass  # Falls through to universal extractor
 
     # -------------------------------------------------------------
     # Fetch web page
