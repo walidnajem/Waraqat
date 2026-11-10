@@ -1,6 +1,8 @@
 import os
 import queue
 import threading
+from auto_updater import check_for_update
+from update_modal import UpdateModal
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -259,6 +261,178 @@ class NewFolderModal(ctk.CTkToplevel):
             self.preview_lbl.configure(text=f"خطأ في إنشاء المجلد: {str(e)}", text_color="#EF4444")
 
 
+# -------------------------------------------------------------------
+# Settings Modal – نافذة إعدادات مدمجة
+# -------------------------------------------------------------------
+class SettingsModal(ctk.CTkToplevel):
+    """نافذة إعدادات تسمح للمستخدم بتغيير مسار التحميل، عدد الـ threads،
+    وتفعيل/إلغاء ميزة حفظ الإعدادات.
+    """
+    def __init__(self, parent, settings, on_save):
+        super().__init__(parent)
+        self.title("الإعدادات | Settings")
+        self.geometry("460x300")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self._settings = settings
+        self._on_save = on_save
+        self._parent = parent
+
+        # ---- مسار التحميل ----
+        ctk.CTkLabel(self, text="مسار حفظ الملفات:", font=("Segoe UI", 11)).pack(pady=(12, 4), anchor="w", padx=20)
+        path_frame = ctk.CTkFrame(self, fg_color="transparent")
+        path_frame.pack(fill="x", padx=20)
+        self.path_entry = ctk.CTkEntry(path_frame, width=260)
+        self.path_entry.insert(0, settings.get("save_path", ""))
+        self.path_entry.pack(side="left", fill="x", expand=True)
+        self.browse_btn = ctk.CTkButton(path_frame, text="استعراض", width=80, command=self._browse_folder)
+        self.browse_btn.pack(side="right", padx=4)
+
+        # ---- عدد الـ threads ----
+        ctk.CTkLabel(self, text="عدد التحميلات المتزامنة (threads):", font=("Segoe UI", 11)).pack(pady=(12, 4), anchor="w", padx=20)
+        self.threads_var = ctk.StringVar(value=str(settings.get("max_workers", 5)))
+        self.threads_entry = ctk.CTkEntry(self, textvariable=self.threads_var, width=80)
+        self.threads_entry.pack(pady=4, padx=20, anchor="w")
+
+        # ---- زر حفظ وإغلاق ----
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=20)
+        ctk.CTkButton(btn_frame, text="حفظ", width=100, command=self._save).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="إلغاء", width=100, command=self.destroy).pack(side="right", padx=10)
+
+    def _browse_folder(self):
+        folder = filedialog.askdirectory(initialdir=self._settings.get("save_path", ""))
+        if folder:
+            self.path_entry.delete(0, ctk.END)
+            self.path_entry.insert(0, folder)
+
+    def _save(self):
+        # تحديث الإعدادات
+        new_path = self.path_entry.get().strip()
+        if new_path:
+            self._settings["save_path"] = new_path
+        try:
+            self._settings["max_workers"] = int(self.threads_var.get())
+        except ValueError:
+            pass
+        # حفظ إلى ملف settings.json عبر الدالة المستوردة
+        self._on_save(self._settings)
+        self.destroy()
+
+class DownloadItem(ctk.CTkFrame):
+    """
+    Modern file item widget featuring:
+    - Checkbox selection
+    - File type badge with vibrant glow color
+    - File title
+    - Per-file interactive progress bar
+    - Dynamic status indicator (Waiting, % Progress, Done, Skipped, Error)
+    """
+    def __init__(self, master, index, item, var):
+        super().__init__(master, fg_color="#181B22", corner_radius=8, border_color="#252A36", border_width=1)
+        self.pack(fill="x", padx=4, pady=3)
+        self.index = index
+        self.item = item
+        self.var = var
+
+        # Main top row container
+        top_row = ctk.CTkFrame(self, fg_color="transparent")
+        top_row.pack(fill="x", padx=10, pady=(6, 4))
+
+        # Checkbox
+        self.cb = ctk.CTkCheckBox(
+            top_row,
+            text="",
+            variable=var,
+            width=22,
+            checkbox_width=18,
+            checkbox_height=18,
+            fg_color="#4F46E5",
+            hover_color="#4338CA"
+        )
+        self.cb.pack(side="left", padx=(0, 6))
+
+        # Type Badge
+        raw_type = item.get("type", "PDF").upper()
+        badge_color = TYPE_COLORS.get(raw_type, "#475569")
+        self.badge = ctk.CTkLabel(
+            top_row,
+            text=raw_type,
+            font=("Segoe UI", 10, "bold"),
+            fg_color=badge_color,
+            text_color="#FFFFFF",
+            corner_radius=6,
+            padx=8,
+            pady=2
+        )
+        self.badge.pack(side="left", padx=(0, 10))
+
+        # File Title
+        title_text = f"{index}. {item.get('title', 'Document')}"
+        self.title_lbl = ctk.CTkLabel(
+            top_row,
+            text=title_text,
+            font=("Segoe UI", 11),
+            text_color="#F1F5F9",
+            anchor="w"
+        )
+        self.title_lbl.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        # Status text on the right
+        self.status_lbl = ctk.CTkLabel(
+            top_row,
+            text="Ready | جاهز",
+            font=("Segoe UI", 10),
+            text_color="#64748B",
+            width=85,
+            anchor="e"
+        )
+        self.status_lbl.pack(side="right")
+
+        # Per-file sleek progress bar (visible when downloading or completed)
+        self.progress_bar = ctk.CTkProgressBar(
+            self,
+            height=4,
+            progress_color="#6366F1",
+            fg_color="#1E2433",
+            corner_radius=2
+        )
+        self.progress_bar.pack(fill="x", padx=10, pady=(0, 6))
+        self.progress_bar.set(0)
+
+    def update_state(self, status, percent=0.0):
+        if status == "downloading":
+            self.configure(border_color="#4F46E5", fg_color="#1A1F2C")
+            self.status_lbl.configure(text=f"{int(percent)}%", text_color="#38BDF8")
+            self.progress_bar.configure(progress_color="#38BDF8")
+            self.progress_bar.set(percent / 100.0)
+        elif status == "progress":
+            self.status_lbl.configure(text=f"{int(percent)}%", text_color="#38BDF8")
+            self.progress_bar.set(percent / 100.0)
+        elif status == "success":
+            self.configure(border_color="#059669", fg_color="#14231E")
+            self.status_lbl.configure(text="Completed ✓", text_color="#10B981")
+            self.progress_bar.configure(progress_color="#10B981")
+            self.progress_bar.set(1.0)
+        elif status == "skip":
+            self.configure(border_color="#334155", fg_color="#161922")
+            self.status_lbl.configure(text="Exists (Skip)", text_color="#94A3B8")
+            self.progress_bar.set(1.0)
+            self.progress_bar.configure(progress_color="#475569")
+        elif status == "failed":
+            self.configure(border_color="#DC2626", fg_color="#241416")
+            self.status_lbl.configure(text="Failed ✗", text_color="#EF4444")
+            self.progress_bar.configure(progress_color="#EF4444")
+        elif status == "cancelled":
+            self.status_lbl.configure(text="Cancelled", text_color="#F59E0B")
+            self.progress_bar.configure(progress_color="#F59E0B")
+        elif status == "retry":
+            self.status_lbl.configure(text="Retrying...", text_color="#F59E0B")
+
+
+
 class App(ctk.CTk):
 
     def __init__(self):
@@ -295,9 +469,47 @@ class App(ctk.CTk):
         self.icon_folder_browse = load_icon_image("folder_browse", (16, 16))
         self.icon_folder_open = load_icon_image("folder_open", (16, 16))
         self.icon_cancel = load_icon_image("cancel", (16, 16))
+        self.icon_settings = load_icon_image("settings", (16, 16))
+        self.icon_update = load_icon_image("update", (16, 16))
+
+        self.download_item_widgets = {}  # Map index -> DownloadItem widget
+
 
         self.build_ui()
+        # بعد بناء الواجهة، نستدعي فحص التحديثات تلقائيًا
+        self.after_ui_build()
         self.after(50, self.process_events)
+
+    def after_ui_build(self):
+        """Called after the UI is constructed.
+        Initiates an asynchronous check for new releases in the background.
+        If a newer version is available, displays the UpdateModal.
+        """
+        def _callback(latest_tag, download_url, release_notes=""):
+            if latest_tag and download_url:
+                self.after(0, lambda: UpdateModal(self, latest_tag, download_url, release_notes))
+
+        check_for_update(_callback)
+
+    def manual_check_updates(self):
+        """Triggered manually by user clicking 'Check for Updates' button."""
+        self.update_btn.configure(state="disabled", text="جاري الفحص...")
+        self.log("[*] Checking GitHub repository for latest updates...")
+
+        def _callback(latest_tag, download_url, release_notes=""):
+            def _ui_update():
+                self.update_btn.configure(state="normal", text="فحص التحديثات | Updates")
+                if latest_tag and download_url:
+                    self.log(f"[+] Update available: {latest_tag}")
+                    UpdateModal(self, latest_tag, download_url, release_notes)
+                elif release_notes == "up_to_date":
+                    self.log("[+] Waraqat is up to date! (أنت تستخدم أحدث إصدار)")
+                else:
+                    self.log("[!] Unable to reach GitHub releases or check updates.")
+
+            self.after(0, _ui_update)
+
+        check_for_update(_callback)
 
     def build_ui(self):
         # ----------------------------------
@@ -341,7 +553,39 @@ class App(ctk.CTk):
             padx=12,
             pady=4
         )
-        version_pill.pack(side="right")
+        version_pill.pack(side="right", padx=(8, 0))
+
+        # Settings Button
+        settings_btn = ctk.CTkButton(
+            header_card,
+            text="الإعدادات | Settings",
+            image=self.icon_settings,
+            font=("Segoe UI", 11),
+            width=130,
+            height=32,
+            fg_color="#1E222B",
+            hover_color="#2A303C",
+            border_color="#334155",
+            border_width=1,
+            command=self.open_settings_dialog
+        )
+        settings_btn.pack(side="right", padx=(6, 0))
+
+        # Check Updates Button
+        self.update_btn = ctk.CTkButton(
+            header_card,
+            text="فحص التحديثات | Updates",
+            image=self.icon_update,
+            font=("Segoe UI", 11),
+            width=150,
+            height=32,
+            fg_color="#1E222B",
+            hover_color="#2A303C",
+            border_color="#334155",
+            border_width=1,
+            command=self.manual_check_updates
+        )
+        self.update_btn.pack(side="right")
 
         # ----------------------------------
         # Card 1: Input URL Tabs
@@ -586,7 +830,7 @@ class App(ctk.CTk):
         )
         self.btn_select_all.pack(side="right")
 
-        self.scroll_files_frame = ctk.CTkScrollableFrame(list_container, height=140, fg_color="#12151C")
+        self.scroll_files_frame = ctk.CTkScrollableFrame(list_container, height=220, fg_color="#12151C")
         self.scroll_files_frame.pack(fill="x", padx=10, pady=(0, 10))
 
         self.placeholder_label = ctk.CTkLabel(
@@ -637,6 +881,22 @@ class App(ctk.CTk):
     # ----------------------------------
     # Settings & Folder Operations
     # ----------------------------------
+    def open_settings_dialog(self):
+        """Opens modern Settings modal dialog."""
+        SettingsModal(self, self.settings, self._on_settings_saved)
+
+    def _on_settings_saved(self, new_settings):
+        """Callback when settings are saved."""
+        self.settings = new_settings
+        save_settings(self.settings)
+        if "save_path" in new_settings:
+            self.selected_save_path = new_settings["save_path"]
+            self.folder_entry.delete(0, "end")
+            self.folder_entry.insert(0, self.selected_save_path)
+        if "max_workers" in new_settings:
+            self.threads_menu.set(str(new_settings["max_workers"]))
+        self.log(f"[SETTINGS] Saved settings successfully: {new_settings}")
+
     def open_new_folder_dialog(self):
         """Opens the modern custom Waraqat New Folder modal dialog."""
         current_path = self.folder_entry.get().strip() or self.selected_save_path
@@ -691,13 +951,14 @@ class App(ctk.CTk):
             pass
 
     # ----------------------------------
-    # Checklist Management with Color Badges
+    # Checklist Management with Color Badges & Per-file Widgets
     # ----------------------------------
     def update_file_checklist(self, files):
         for widget in self.scroll_files_frame.winfo_children():
             widget.destroy()
 
         self.checkbox_vars = []
+        self.download_item_widgets = {}
 
         if not files:
             lbl = ctk.CTkLabel(
@@ -712,47 +973,9 @@ class App(ctk.CTk):
             var = ctk.BooleanVar(value=True)
             self.checkbox_vars.append(var)
 
-            row = ctk.CTkFrame(self.scroll_files_frame, fg_color="#181B22", corner_radius=6)
-            row.pack(fill="x", padx=4, pady=3)
-
-            # Checkbox
-            cb = ctk.CTkCheckBox(
-                row,
-                text="",
-                variable=var,
-                width=24,
-                checkbox_width=20,
-                checkbox_height=20,
-                fg_color="#4F46E5",
-                hover_color="#4338CA"
-            )
-            cb.pack(side="left", padx=(8, 4), pady=4)
-
-            # Type Badge
-            raw_type = item.get("type", "PDF").upper()
-            badge_color = TYPE_COLORS.get(raw_type, "#475569")
-
-            badge = ctk.CTkLabel(
-                row,
-                text=raw_type,
-                font=("Segoe UI", 10, "bold"),
-                fg_color=badge_color,
-                text_color="#FFFFFF",
-                corner_radius=6,
-                padx=8,
-                pady=2
-            )
-            badge.pack(side="left", padx=(0, 10))
-
-            # Title
-            title_lbl = ctk.CTkLabel(
-                row,
-                text=f"{i}. {item.get('title', 'Document')}",
-                font=("Segoe UI", 11),
-                text_color="#F1F5F9",
-                anchor="w"
-            )
-            title_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            # Create interactive DownloadItem widget
+            item_widget = DownloadItem(self.scroll_files_frame, i, item, var)
+            self.download_item_widgets[i] = item_widget
 
     def select_all_files(self):
         for var in self.checkbox_vars:
@@ -783,6 +1006,13 @@ class App(ctk.CTk):
                         self.progress.set(value)
                         self.progress_label.configure(text=f"{round(value * 100)}%")
 
+                elif event_type == "item_progress":
+                    idx = event["index"]
+                    status = event["status"]
+                    pct = event["percent"]
+                    if idx in self.download_item_widgets:
+                        self.download_item_widgets[idx].update_state(status, pct)
+
                 elif event_type == "analyze_done":
                     site = event["site"]
                     count = event["count"]
@@ -808,6 +1038,14 @@ class App(ctk.CTk):
                 break
 
         self.after(50, self.process_events)
+
+    def update_item_progress(self, index, status, percent=0.0):
+        self.event_queue.put({
+            "type": "item_progress",
+            "index": index,
+            "status": status,
+            "percent": percent
+        })
 
     def log(self, text):
         self.event_queue.put({"type": "log", "message": str(text)})
@@ -953,7 +1191,8 @@ class App(ctk.CTk):
                 self.update_progress,
                 self.log,
                 self.cancel_event,
-                workers
+                workers,
+                item_callback=self.update_item_progress
             )
 
             if self.cancel_event.is_set():

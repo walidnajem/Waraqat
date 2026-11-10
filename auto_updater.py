@@ -24,8 +24,12 @@ def parse_version(v: str) -> tuple:
 def check_for_update(callback):
     """
     Runs in a background thread.
-    Calls callback(latest_version, download_url) if a new version exists,
-    or callback(None, None) if up-to-date or failed.
+    Calls callback(latest_version, download_url, release_notes)
+    - latest_version: str (e.g. 'v0.3.1')
+    - download_url: str (url to .exe)
+    - release_notes: str (release body / changelog)
+    If up to date: calls callback(None, None, "up_to_date")
+    If failed / no connection: calls callback(None, None, "error")
     """
     def _run():
         try:
@@ -36,16 +40,17 @@ def check_for_update(callback):
                          "User-Agent": "Waraqat-App"}
             )
             if resp.status_code != 200:
-                callback(None, None)
+                callback(None, None, "error")
                 return
 
             data = resp.json()
             latest_tag = data.get("tag_name", "")
+            release_notes = data.get("body", "تحديثات وتحسينات جديدة للأداء.")
             latest_ver = parse_version(latest_tag)
             current_ver = parse_version(APP_VERSION)
 
             if latest_ver <= current_ver:
-                callback(None, None)
+                callback(None, None, "up_to_date")
                 return
 
             # Find the .exe asset
@@ -61,10 +66,10 @@ def check_for_update(callback):
             if not exe_url:
                 exe_url = data.get("zipball_url")
 
-            callback(latest_tag, exe_url)
+            callback(latest_tag, exe_url, release_notes)
 
-        except Exception:
-            callback(None, None)
+        except Exception as e:
+            callback(None, None, f"error: {str(e)}")
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()

@@ -1,10 +1,11 @@
+
 import os
 import sys
 import json
 
 APP_NAME = "Waraqat | ورقات"
 APP_SUBTITLE = "المنظومة الذكية لسحب وتنزيل المستندات والكتب"
-APP_VERSION = "3.0"
+APP_VERSION = "0.3.0"
 
 DEFAULT_MAX_WORKERS = 5
 TIMEOUT = 60
@@ -44,3 +45,8 @@ def save_settings(settings):
             json.dump(settings, f, indent=4, ensure_ascii=False)
     except Exception:
         pass
+
+# ---------- GitHub Auto‑Update Settings ----------
+GITHUB_OWNER = "walidnajem"
+GITHUB_REPO  = "Waraqat"
+UPDATE_CHECK_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"

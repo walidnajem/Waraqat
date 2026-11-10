@@ -21,7 +21,7 @@ HEADERS = {
 print_lock = Lock()
 
 
-def download_gdrive(file_id, filepath, cancel_event=None):
+def download_gdrive(file_id, filepath, cancel_event=None, item_progress_callback=None):
     """
     Downloads a Google Drive file, handling large file confirmation warnings
     and streaming chunks to avoid high RAM consumption.
@@ -61,6 +61,9 @@ def download_gdrive(file_id, filepath, cancel_event=None):
         )
         response.raise_for_status()
 
+    total_bytes = int(response.headers.get("content-length", 0))
+    downloaded_bytes = 0
+
     with open(filepath, "wb") as f:
         for chunk in response.iter_content(chunk_size=65536):
             if cancel_event and cancel_event.is_set():
@@ -70,6 +73,10 @@ def download_gdrive(file_id, filepath, cancel_event=None):
                 raise Exception("Download cancelled by user")
             if chunk:
                 f.write(chunk)
+                downloaded_bytes += len(chunk)
+                if item_progress_callback and total_bytes > 0:
+                    pct = min(100.0, (downloaded_bytes / total_bytes) * 100.0)
+                    item_progress_callback(pct, downloaded_bytes, total_bytes)
 
     if os.path.getsize(filepath) < 1000:
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
@@ -79,11 +86,8 @@ def download_gdrive(file_id, filepath, cancel_event=None):
                 raise Exception("Google Drive returned HTML instead of document (Access denied or file restricted)")
 
 
-def download_stream_file(url, filepath, cancel_event=None):
-    """
-    Downloads any document (PDF, Word, etc.) using chunk streaming.
-    Checks for HTML error responses.
-    """
+def download_stream_file(url, filepath, cancel_event=None, item_progress_callback=None):
+    """Downloads any document (PDF, Word, etc.) using chunk streaming."""
     response = requests.get(
         url,
         headers=HEADERS,
@@ -93,7 +97,11 @@ def download_stream_file(url, filepath, cancel_event=None):
     )
     response.raise_for_status()
 
+    total_bytes = int(response.headers.get("content-length", 0))
+    downloaded_bytes = 0
+
     first_chunk = True
+    os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
     with open(filepath, "wb") as f:
         for chunk in response.iter_content(chunk_size=65536):
             if cancel_event and cancel_event.is_set():
@@ -112,6 +120,10 @@ def download_stream_file(url, filepath, cancel_event=None):
                             os.remove(filepath)
                         raise Exception("Server returned an HTML webpage instead of a document file.")
                 f.write(chunk)
+                downloaded_bytes += len(chunk)
+                if item_progress_callback and total_bytes > 0:
+                    pct = min(100.0, (downloaded_bytes / total_bytes) * 100.0)
+                    item_progress_callback(pct, downloaded_bytes, total_bytes)
 
     if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
         if os.path.exists(filepath):
@@ -119,12 +131,14 @@ def download_stream_file(url, filepath, cancel_event=None):
         raise Exception("Downloaded file is empty (0 bytes)")
 
 
-def download_file(index, total, item, folder, log_callback=None, cancel_event=None):
+def download_file(index, total, item, folder, log_callback=None, cancel_event=None, item_callback=None):
     """
     Downloads a single file item with automatic retry mechanism (3 attempts)
     and duplicate skipping.
     """
     if cancel_event and cancel_event.is_set():
+        if item_callback:
+            item_callback(index, "cancelled", 0.0)
         return "cancelled"
 
     raw_type = item.get("type", "PDF").upper()
@@ -140,23 +154,33 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
     if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
         if log_callback:
             log_callback(f"[SKIP] (Already exists) -> {filename}")
+        if item_callback:
+            item_callback(index, "skip", 100.0)
         return "skip"
 
     if log_callback:
         log_callback(f"[DOWNLOAD] [{index}/{total}] -> {filename}")
+    if item_callback:
+        item_callback(index, "downloading", 0.0)
+
+    def _chunk_cb(pct, downloaded, total_b):
+        if item_callback:
+            item_callback(index, "progress", pct)
 
     for attempt in range(3):
         if cancel_event and cancel_event.is_set():
             if os.path.exists(filepath):
                 os.remove(filepath)
+            if item_callback:
+                item_callback(index, "cancelled", 0.0)
             return "cancelled"
 
         try:
             start_time = time.time()
             if raw_type == "GDRIVE":
-                download_gdrive(item["id"], filepath, cancel_event)
+                download_gdrive(item["id"], filepath, cancel_event, item_progress_callback=_chunk_cb)
             else:
-                download_stream_file(item["url"], filepath, cancel_event)
+                download_stream_file(item["url"], filepath, cancel_event, item_progress_callback=_chunk_cb)
 
             elapsed = max(time.time() - start_time, 0.1)
             size_mb = round(os.path.getsize(filepath) / 1024 / 1024, 2)
@@ -164,10 +188,14 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
 
             if log_callback:
                 log_callback(f"[OK] {filename} ({size_mb} MB at {speed_mb} MB/s)")
+            if item_callback:
+                item_callback(index, "success", 100.0)
             return "success"
 
         except Exception as e:
             if "cancelled" in str(e).lower():
+                if item_callback:
+                    item_callback(index, "cancelled", 0.0)
                 return "cancelled"
 
             if os.path.exists(filepath):
@@ -179,18 +207,22 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
             if attempt < 2 and (not cancel_event or not cancel_event.is_set()):
                 if log_callback:
                     log_callback(f"[RETRY] ({attempt + 1}/3) -> {filename}")
+                if item_callback:
+                    item_callback(index, "retry", 0.0)
                 time.sleep(2)
             else:
                 if log_callback:
                     log_callback(f"[FAILED] {filename} ({str(e)})")
+                if item_callback:
+                    item_callback(index, "failed", 0.0)
 
     return "failed"
 
 
-def download_parallel(files, folder, progress_callback=None, log_callback=None, cancel_event=None, max_workers=DEFAULT_MAX_WORKERS):
+def download_parallel(files, folder, progress_callback=None, log_callback=None, cancel_event=None, max_workers=DEFAULT_MAX_WORKERS, item_callback=None):
     """
     Manages parallel downloads using ThreadPoolExecutor.
-    Supports real-time cancellation and configurable thread count.
+    Supports real-time per-file progress callback, cancellation and configurable thread count.
     """
     total = len(files)
     success = 0
@@ -202,13 +234,21 @@ def download_parallel(files, folder, progress_callback=None, log_callback=None, 
     if log_callback:
         log_callback(f"[*] Starting download ({max_workers} threads)...")
 
-    progress = tqdm(
-        total=total,
-        desc="Downloading",
-        unit="file",
-        dynamic_ncols=True,
-        colour="green"
-    )
+    # Don't use tqdm if stdout/stderr is None (GUI windowed mode)
+    import sys
+    use_tqdm = sys.stderr is not None and sys.stdout is not None
+    progress = None
+    if use_tqdm:
+        try:
+            progress = tqdm(
+                total=total,
+                desc="Downloading",
+                unit="file",
+                dynamic_ncols=True,
+                colour="green"
+            )
+        except Exception:
+            progress = None
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -219,7 +259,8 @@ def download_parallel(files, folder, progress_callback=None, log_callback=None, 
                 item,
                 folder,
                 log_callback,
-                cancel_event
+                cancel_event,
+                item_callback
             ): index
             for index, item in enumerate(files, start=1)
         }
@@ -246,7 +287,11 @@ def download_parallel(files, folder, progress_callback=None, log_callback=None, 
             else:
                 failed += 1
 
-            progress.update(1)
+            if progress:
+                try:
+                    progress.update(1)
+                except Exception:
+                    pass
 
             if progress_callback:
                 try:
@@ -254,7 +299,11 @@ def download_parallel(files, folder, progress_callback=None, log_callback=None, 
                 except Exception:
                     pass
 
-    progress.close()
+    if progress:
+        try:
+            progress.close()
+        except Exception:
+            pass
 
     result = {
         "total": total,

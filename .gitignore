@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+Waraqat.exe
+Waraqat_update.exe
+Waraqat_update.bat
+settings.json
+test_dl/
+test_out.txt
