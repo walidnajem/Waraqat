@@ -1,6 +1,17 @@
+import os
 import re
 import arabic_reshaper
 from bidi.algorithm import get_display
+
+# Device names that Windows reserves regardless of extension.
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+MAX_FILENAME_CHARS = 120
+DEFAULT_MAX_PATH = 240
 
 
 def ar(text):
@@ -14,7 +25,8 @@ def ar(text):
 def clean_filename(text):
     """
     Cleans and sanitizes a string to make it a valid Windows/Linux filename.
-    Removes invalid characters, strips extra whitespace, and strips .pdf suffix.
+    Removes invalid characters, handles reserved device names, strips extra
+    whitespace, and strips .pdf suffix.
     """
     if not text:
         return "unnamed_document"
@@ -42,7 +54,41 @@ def clean_filename(text):
     if not text:
         return "unnamed_document"
 
-    return text[:120]
+    # Windows reserves CON, PRN, AUX, NUL, COM1-9 and LPT1-9 (with or without
+    # an extension). Prefixing with "_" makes the name safe.
+    stem = text.split(".")[0].strip().upper()
+    if stem in WINDOWS_RESERVED_NAMES:
+        text = "_" + text
+
+    return text[:MAX_FILENAME_CHARS].rstrip('. ')
+
+
+def fit_filename(folder, filename, max_path=DEFAULT_MAX_PATH):
+    """
+    Shortens a filename so the full path stays below the Windows MAX_PATH
+    limit (260 chars by default). Keeps the extension and the leading number.
+    """
+    if not filename:
+        return filename
+
+    try:
+        folder_len = len(os.path.abspath(folder))
+    except Exception:
+        folder_len = len(str(folder))
+
+    ext = os.path.splitext(filename)[1]
+    stem = filename[:-len(ext)] if ext else filename
+    available = max_path - folder_len - 1 - len(ext)
+
+    if available < 16:
+        available = 16
+
+    if len(stem) <= available:
+        return filename
+
+    keep = max(1, available - 3)
+    shortened = stem[:keep].rstrip('. ') + "..."
+    return shortened + ext
 
 
 def safe_print(text):

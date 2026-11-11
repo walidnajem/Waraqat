@@ -283,8 +283,8 @@ class SettingsModal(ctk.CTkToplevel):
         self._on_save = on_save
 
         self.title("الإعدادات | Settings")
-        self.geometry("540x560")
-        self.minsize(500, 520)
+        self.geometry("540x610")
+        self.minsize(500, 560)
         self.resizable(False, False)
 
         # Set window icon
@@ -308,7 +308,7 @@ class SettingsModal(ctk.CTkToplevel):
             ph = self.parent.winfo_height()
             px = self.parent.winfo_rootx()
             py = self.parent.winfo_rooty()
-            w, h = 540, 560
+            w, h = 540, 610
             x = px + (pw - w) // 2
             y = py + (ph - h) // 2
             self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
@@ -413,6 +413,35 @@ class SettingsModal(ctk.CTkToplevel):
                 break
         self.threads_menu.set(match_val)
         self.threads_menu.pack(side="left")
+
+        timeout_row = ctk.CTkFrame(sec2, fg_color="transparent")
+        timeout_row.pack(fill="x", pady=(6, 0))
+
+        ctk.CTkLabel(
+            timeout_row,
+            text="مهلة القراءة | Read timeout:",
+            font=("Segoe UI", 11)
+        ).pack(side="left", padx=(0, 8))
+
+        self.timeout_menu = ctk.CTkOptionMenu(
+            timeout_row,
+            values=["15 ثانية", "30 ثانية", "60 ثانية (موصى به)", "120 ثانية"],
+            width=180,
+            height=30
+        )
+        try:
+            curr_timeout = int(self._settings.get("timeout", 60))
+        except (TypeError, ValueError):
+            curr_timeout = 60
+        timeout_match = f"{curr_timeout} ثانية"
+        if curr_timeout == 60:
+            timeout_match = "60 ثانية (موصى به)"
+        for tv in self.timeout_menu._values:
+            if str(curr_timeout) in tv:
+                timeout_match = tv
+                break
+        self.timeout_menu.set(timeout_match)
+        self.timeout_menu.pack(side="left")
 
         # --- Section 3: Appearance & Theme ---
         sec3 = ctk.CTkFrame(content, fg_color="transparent")
@@ -524,6 +553,13 @@ class SettingsModal(ctk.CTkToplevel):
             self._settings["max_workers"] = int(raw_worker)
         except Exception:
             self._settings["max_workers"] = 5
+
+        # Parse read timeout
+        raw_timeout = self.timeout_menu.get().split()[0]
+        try:
+            self._settings["timeout"] = int(raw_timeout)
+        except Exception:
+            self._settings["timeout"] = 60
 
         # Parse theme
         raw_theme = self.theme_menu.get().split()[0]
@@ -1433,6 +1469,7 @@ class App(ctk.CTk):
                 elif event_type == "analyze_done":
                     site = event["site"]
                     count = event["count"]
+                    self.files = event.get("files", [])
                     self.site_label.configure(text=f"Domain | الموقع: {site}")
                     self.files_label.configure(text=f"Files | الملفات المكتشفة: {count}")
                     self.update_file_checklist(self.files)
@@ -1545,13 +1582,13 @@ class App(ctk.CTk):
                 files = extract_files_batch(urls, self.log)
                 site_name = f"Batch ({len(urls)} URLs)"
 
-            self.files = files
             self.log(f"[+] Scan completed! Found {len(files)} downloadable file(s).")
 
             self.event_queue.put({
                 "type": "analyze_done",
                 "site": site_name,
-                "count": len(files)
+                "count": len(files),
+                "files": files
             })
 
         except Exception as e:
@@ -1589,12 +1626,23 @@ class App(ctk.CTk):
             target_folder = raw_folder
 
         target_folder = os.path.abspath(target_folder)
-        os.makedirs(target_folder, exist_ok=True)
+        try:
+            os.makedirs(target_folder, exist_ok=True)
+        except OSError as e:
+            self.log(f"[ERROR] Could not create save folder: {str(e)}")
+            return
 
         try:
             workers = int(self.threads_menu.get())
         except Exception:
             workers = 5
+
+        try:
+            timeout = int(self.settings.get("timeout", 60))
+        except (TypeError, ValueError):
+            timeout = 60
+        if timeout <= 0:
+            timeout = 60
 
         self.is_working = True
         self.cancel_event.clear()
@@ -1607,17 +1655,17 @@ class App(ctk.CTk):
 
         threading.Thread(
             target=self._download_worker,
-            args=(selected_files, target_folder, workers),
+            args=(selected_files, target_folder, workers, timeout),
             daemon=True
         ).start()
 
     def cancel_download(self):
         if self.is_working:
             self.cancel_event.set()
-            self.log("[!] Cancellation signal sent. Halting active downloads...")
+            self.log("[!] Cancellation signal sent. Partial files are kept as .part and will resume next time.")
             self.cancel_btn.configure(state="disabled")
 
-    def _download_worker(self, files_to_download, target_folder, workers):
+    def _download_worker(self, files_to_download, target_folder, workers, timeout=60):
         try:
             os.makedirs(target_folder, exist_ok=True)
             self.log("=" * 50)
@@ -1633,24 +1681,29 @@ class App(ctk.CTk):
                 self.log,
                 self.cancel_event,
                 workers,
-                item_callback=self.update_item_progress
+                item_callback=self.update_item_progress,
+                timeout=timeout
             )
 
             if self.cancel_event.is_set():
                 self.log("[!] Download was cancelled by user.")
             else:
                 self.log("=" * 50)
-                self.log("[+] All selected downloads finished successfully!")
+                failed_count = result.get("failed", 0)
+                if failed_count > 0:
+                    self.log(f"[!] Downloads finished with {failed_count} failure(s). Check the log above.")
+                else:
+                    self.log("[+] All selected downloads finished successfully!")
                 self.log(f"[+] All files are stored inside: {target_folder}")
                 self.log("[+] Click 'Open | فتح' to view your downloaded files.")
                 self.log("=" * 50)
 
                 # Toast notification on completion
                 if self.settings.get("notifications_enabled", True):
-                    notify_download_complete(
-                        "ورقات | Waraqat",
-                        f"تم تحميل {result.get('success', 0)} ملف بنجاح إلى {target_folder}"
-                    )
+                    message = f"تم تحميل {result.get('success', 0)} ملف بنجاح إلى {target_folder}"
+                    if failed_count:
+                        message += f" (فشل {failed_count})"
+                    notify_download_complete("ورقات | Waraqat", message)
 
                 # Auto-open folder if enabled in settings
                 if self.settings.get("open_folder_on_finish", True):
