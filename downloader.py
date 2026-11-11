@@ -21,6 +21,20 @@ HEADERS = {
 print_lock = Lock()
 
 
+def _looks_like_html(chunk):
+    """Heuristic check for an HTML/error page served instead of a document."""
+    peek = chunk[:512].lower()
+    return b"<!doctype" in peek or b"<html" in peek or b"<head" in peek
+
+
+def _remove_file(filepath):
+    try:
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
+    except OSError:
+        pass
+
+
 def download_gdrive(file_id, filepath, cancel_event=None, item_progress_callback=None):
     """
     Downloads a Google Drive file, handling large file confirmation warnings
@@ -28,6 +42,7 @@ def download_gdrive(file_id, filepath, cancel_event=None, item_progress_callback
     """
     session = requests.Session()
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
 
     response = session.get(
         url,
@@ -45,12 +60,17 @@ def download_gdrive(file_id, filepath, cancel_event=None, item_progress_callback
             confirm_token = value
             break
 
-    if not confirm_token and "text/html" in response.headers.get("Content-Type", ""):
+    content_type = response.headers.get("Content-Type", "").lower()
+    if not confirm_token and "text/html" in content_type:
         match = re.search(r"confirm=([0-9A-Za-z_]+)", response.text)
         if match:
             confirm_token = match.group(1)
 
     if confirm_token:
+        try:
+            response.close()
+        except Exception:
+            pass
         confirm_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
         response = session.get(
             confirm_url,
@@ -61,29 +81,47 @@ def download_gdrive(file_id, filepath, cancel_event=None, item_progress_callback
         )
         response.raise_for_status()
 
+    # A Drive "access denied / quota exceeded" page must never be saved as a document.
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "text/html" in content_type:
+        try:
+            response.close()
+        except Exception:
+            pass
+        raise Exception(
+            "Google Drive returned an HTML page instead of the document "
+            "(file restricted, removed, or quota exceeded)"
+        )
+
     total_bytes = int(response.headers.get("content-length", 0))
     downloaded_bytes = 0
+    first_chunk = True
 
     with open(filepath, "wb") as f:
         for chunk in response.iter_content(chunk_size=65536):
             if cancel_event and cancel_event.is_set():
                 f.close()
-                if os.path.exists(filepath):
-                    os.remove(filepath)
+                _remove_file(filepath)
                 raise Exception("Download cancelled by user")
             if chunk:
+                if first_chunk:
+                    first_chunk = False
+                    if _looks_like_html(chunk):
+                        f.close()
+                        _remove_file(filepath)
+                        raise Exception(
+                            "Google Drive returned an HTML page instead of the document "
+                            "(file restricted, removed, or quota exceeded)"
+                        )
                 f.write(chunk)
                 downloaded_bytes += len(chunk)
                 if item_progress_callback and total_bytes > 0:
                     pct = min(100.0, (downloaded_bytes / total_bytes) * 100.0)
                     item_progress_callback(pct, downloaded_bytes, total_bytes)
 
-    if os.path.getsize(filepath) < 1000:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-            if "<html" in content.lower():
-                os.remove(filepath)
-                raise Exception("Google Drive returned HTML instead of document (Access denied or file restricted)")
+    if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+        _remove_file(filepath)
+        raise Exception("Downloaded file is empty (0 bytes)")
 
 
 def download_stream_file(url, filepath, cancel_event=None, item_progress_callback=None):
@@ -97,6 +135,14 @@ def download_stream_file(url, filepath, cancel_event=None, item_progress_callbac
     )
     response.raise_for_status()
 
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "text/html" in content_type:
+        try:
+            response.close()
+        except Exception:
+            pass
+        raise Exception("Server returned an HTML webpage instead of a document file.")
+
     total_bytes = int(response.headers.get("content-length", 0))
     downloaded_bytes = 0
 
@@ -106,18 +152,15 @@ def download_stream_file(url, filepath, cancel_event=None, item_progress_callbac
         for chunk in response.iter_content(chunk_size=65536):
             if cancel_event and cancel_event.is_set():
                 f.close()
-                if os.path.exists(filepath):
-                    os.remove(filepath)
+                _remove_file(filepath)
                 raise Exception("Download cancelled by user")
 
             if chunk:
                 if first_chunk:
                     first_chunk = False
-                    peek = chunk[:250].lower()
-                    if b"<!doctype" in peek or b"<html" in peek or b"<head" in peek:
+                    if _looks_like_html(chunk):
                         f.close()
-                        if os.path.exists(filepath):
-                            os.remove(filepath)
+                        _remove_file(filepath)
                         raise Exception("Server returned an HTML webpage instead of a document file.")
                 f.write(chunk)
                 downloaded_bytes += len(chunk)
@@ -126,8 +169,7 @@ def download_stream_file(url, filepath, cancel_event=None, item_progress_callbac
                     item_progress_callback(pct, downloaded_bytes, total_bytes)
 
     if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        _remove_file(filepath)
         raise Exception("Downloaded file is empty (0 bytes)")
 
 
@@ -136,7 +178,10 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
     Downloads a single file item with automatic retry mechanism (3 attempts)
     and duplicate skipping.
     """
-    file_idx = item.get("orig_index", index)
+    try:
+        file_idx = int(item.get("orig_index", index))
+    except (TypeError, ValueError):
+        file_idx = index
     if cancel_event and cancel_event.is_set():
         if item_callback:
             item_callback(file_idx, "cancelled", 0.0)
@@ -148,7 +193,10 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
         ext = "pdf"
 
     title = clean_filename(item.get("title", f"Document_{index}"))
-    filename = f"{index:02d}_{title}.{ext}"
+    # Keep the number shown in the checklist, even when only a subset is
+    # selected/filtered. Using the batch position here would renumber files
+    # and could skip or duplicate existing downloads.
+    filename = f"{file_idx:02d}_{title}.{ext}"
     filepath = os.path.join(folder, filename)
 
     # Skip if file already exists and is not empty

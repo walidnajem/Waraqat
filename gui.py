@@ -721,8 +721,13 @@ class App(ctk.CTk):
             return
 
         def _callback(latest_tag, download_url, release_notes=""):
-            if latest_tag and download_url:
-                self.after(0, lambda: UpdateModal(self, latest_tag, download_url, release_notes))
+            self.event_queue.put({
+                "type": "update_result",
+                "latest_tag": latest_tag,
+                "download_url": download_url,
+                "release_notes": release_notes,
+                "manual": False,
+            })
 
         check_for_update(_callback)
 
@@ -732,17 +737,13 @@ class App(ctk.CTk):
         self.log("[*] Checking GitHub repository for latest updates...")
 
         def _callback(latest_tag, download_url, release_notes=""):
-            def _ui_update():
-                self.update_btn.configure(state="normal", text="فحص التحديثات | Updates")
-                if latest_tag and download_url:
-                    self.log(f"[+] Update available: {latest_tag}")
-                    UpdateModal(self, latest_tag, download_url, release_notes)
-                elif release_notes == "up_to_date":
-                    self.log("[+] Waraqat is up to date! (أنت تستخدم أحدث إصدار)")
-                else:
-                    self.log("[!] Unable to reach GitHub releases or check updates.")
-
-            self.after(0, _ui_update)
+            self.event_queue.put({
+                "type": "update_result",
+                "latest_tag": latest_tag,
+                "download_url": download_url,
+                "release_notes": release_notes,
+                "manual": True,
+            })
 
         check_for_update(_callback)
 
@@ -1449,6 +1450,27 @@ class App(ctk.CTk):
                     self.download_btn.configure(state="normal", text="Download Selected | بدء تنزيل المحدد")
                     self.cancel_btn.configure(state="disabled")
                     self.is_working = False
+
+                elif event_type == "update_result":
+                    manual = event.get("manual", False)
+                    latest_tag = event.get("latest_tag")
+                    download_url = event.get("download_url")
+                    release_notes = event.get("release_notes", "")
+
+                    if manual:
+                        self.update_btn.configure(state="normal", text="فحص التحديثات | Updates")
+
+                    if latest_tag and download_url:
+                        if manual:
+                            self.log(f"[+] Update available: {latest_tag}")
+                        UpdateModal(self, latest_tag, download_url, release_notes)
+                    elif manual:
+                        if release_notes == "up_to_date":
+                            self.log("[+] Waraqat is up to date! (أنت تستخدم أحدث إصدار)")
+                        elif release_notes == "no_asset":
+                            self.log("[!] The latest release does not include a Waraqat.exe asset.")
+                        else:
+                            self.log("[!] Unable to reach GitHub releases or check updates.")
 
             except queue.Empty:
                 break

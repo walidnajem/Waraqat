@@ -5,7 +5,7 @@ import json
 
 APP_NAME = "Waraqat | ورقات"
 APP_SUBTITLE = "المنظومة الذكية لسحب وتنزيل المستندات والكتب"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 
 DEFAULT_MAX_WORKERS = 5
 TIMEOUT = 60

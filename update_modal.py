@@ -1,6 +1,7 @@
 # update_modal.py — نافذة تحديث Waraqat الاحترافية
 import os
 import sys
+import queue
 import customtkinter as ctk
 from PIL import Image
 from auto_updater import download_and_install
@@ -24,6 +25,8 @@ class UpdateModal(ctk.CTkToplevel):
         self.version_tag = version_tag
         self.download_url = download_url
         self.release_notes = release_notes or "تحسينات عامة في الأداء وإصلاحات لمشاكل الاستقرار."
+        # Worker callbacks are pushed here and handled on the Tk main thread only.
+        self._events = queue.Queue()
 
         self.title("تحديث ورقات | Waraqat Auto-Update")
         self.geometry("520x420")
@@ -43,6 +46,7 @@ class UpdateModal(ctk.CTkToplevel):
 
         self.build_ui()
         self.center_window()
+        self._poll_job = self.after(100, self._poll_events)
 
     def center_window(self):
         self.update_idletasks()
@@ -191,12 +195,35 @@ class UpdateModal(ctk.CTkToplevel):
         self.progress_bar.set(0)
 
         def _prog(pct):
-            self.after(0, lambda: self._on_prog(pct))
+            self._events.put(("progress", pct))
 
         def _done(success, msg):
-            self.after(0, lambda: self._on_done(success, msg))
+            self._events.put(("done", (success, msg)))
 
         download_and_install(self.download_url, progress_callback=_prog, done_callback=_done)
+
+    def _poll_events(self):
+        """Drains worker events on the Tk main thread."""
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+
+        try:
+            while True:
+                kind, payload = self._events.get_nowait()
+                if kind == "progress":
+                    self._on_prog(payload)
+                elif kind == "done":
+                    self._on_done(*payload)
+        except queue.Empty:
+            pass
+
+        try:
+            self._poll_job = self.after(100, self._poll_events)
+        except Exception:
+            pass
 
     def _on_prog(self, pct):
         self.progress_bar.set(pct / 100.0)
@@ -205,11 +232,35 @@ class UpdateModal(ctk.CTkToplevel):
     def _on_done(self, success, msg):
         if success:
             self.status_lbl.configure(
-                text="✓ تم التنزيل بنجاح! جاري تثبيت النسخة وإعادة تشغيل التطبيق...",
+                text="✓ تم التنزيل! سيتم إغلاق التطبيق وتثبيت النسخة الجديدة تلقائياً...",
                 text_color="#10B981"
             )
             self.pct_lbl.configure(text="100%")
+            self.btn_install.configure(state="disabled")
+            self.btn_cancel.configure(state="disabled")
+            # Give the helper script time to start, then exit so it can
+            # replace the locked exe and relaunch the new version.
+            self.after(1200, self._exit_for_update)
         else:
             self.status_lbl.configure(text=f"فشل التحديث: {msg}", text_color="#EF4444")
             self.btn_install.configure(state="normal", text="إعادة المحاولة | Retry")
             self.btn_cancel.configure(state="normal")
+
+    def _exit_for_update(self):
+        """Closes the whole application so the updater can replace the exe."""
+        try:
+            self._poll_job and self.after_cancel(self._poll_job)
+        except Exception:
+            pass
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        try:
+            self.parent.destroy()
+        except Exception:
+            pass
