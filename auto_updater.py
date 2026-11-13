@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import requests
 
-from config import APP_VERSION, GITHUB_OWNER, GITHUB_REPO, UPDATE_CHECK_URL
+from config import APP_VERSION, UPDATE_CHECK_URL
 
 # Minimum plausible size for the packaged Waraqat exe (guards against HTML/error pages).
 MIN_UPDATE_SIZE = 1024 * 100

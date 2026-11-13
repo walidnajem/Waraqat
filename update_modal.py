@@ -64,7 +64,7 @@ class UpdateModal(ctk.CTkToplevel):
 
     def build_ui(self):
         # Outer Card Container
-        card = ctk.CTkFrame(self, fg_color="#181B22", corner_radius=12, border_color="#334155", border_width=1)
+        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
         card.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Top Header
@@ -89,7 +89,7 @@ class UpdateModal(ctk.CTkToplevel):
             title_box,
             text="يتوفر إصدار جديد من ورقات!",
             font=("Segoe UI", 16, "bold"),
-            text_color="#F8FAFC"
+            text_color=("gray10", "#F8FAFC")
         )
         title.pack(anchor="w")
 
@@ -97,19 +97,19 @@ class UpdateModal(ctk.CTkToplevel):
             title_box,
             text=f"الإصدار الحالي: v{APP_VERSION}  ←  الإصدار الجديد: {self.version_tag}",
             font=("Segoe UI", 11),
-            text_color="#38BDF8"
+            text_color=("#0284C7", "#38BDF8")
         )
         sub.pack(anchor="w")
 
         # Release Notes Box
-        notes_frame = ctk.CTkFrame(card, fg_color="#12151C", corner_radius=8, border_color="#252A36", border_width=1)
+        notes_frame = ctk.CTkFrame(card, fg_color=("gray95", "#12151C"), corner_radius=8, border_color=("gray75", "#252A36"), border_width=1)
         notes_frame.pack(fill="both", expand=True, padx=16, pady=(5, 12))
 
         lbl_notes_title = ctk.CTkLabel(
             notes_frame,
             text="سجل التغييرات والميزات الجديدة | What's New:",
             font=("Segoe UI", 11, "bold"),
-            text_color="#94A3B8"
+            text_color=("gray40", "#94A3B8")
         )
         lbl_notes_title.pack(anchor="w", padx=12, pady=(8, 4))
 
@@ -117,7 +117,7 @@ class UpdateModal(ctk.CTkToplevel):
             notes_frame,
             font=("Segoe UI", 11),
             fg_color="transparent",
-            text_color="#E2E8F0",
+            text_color=("gray10", "#E2E8F0"),
             wrap="word",
             border_width=0
         )
@@ -136,7 +136,7 @@ class UpdateModal(ctk.CTkToplevel):
             status_row,
             text="جاهز للتنزيل والتثبيت مباشرة",
             font=("Segoe UI", 11),
-            text_color="#94A3B8"
+            text_color=("gray40", "#94A3B8")
         )
         self.status_lbl.pack(side="left")
 
@@ -144,7 +144,7 @@ class UpdateModal(ctk.CTkToplevel):
             status_row,
             text="",
             font=("Segoe UI", 11, "bold"),
-            text_color="#38BDF8"
+            text_color=("#0284C7", "#38BDF8")
         )
         self.pct_lbl.pack(side="right")
 
@@ -152,7 +152,7 @@ class UpdateModal(ctk.CTkToplevel):
             self.progress_frame,
             height=8,
             progress_color="#059669",
-            fg_color="#1E2433"
+            fg_color=("gray80", "#1E2433")
         )
         self.progress_bar.pack(fill="x")
         self.progress_bar.set(0)
@@ -178,20 +178,21 @@ class UpdateModal(ctk.CTkToplevel):
             width=100,
             height=38,
             font=("Segoe UI", 11),
-            fg_color="#334155",
-            hover_color="#475569",
+            fg_color=("gray75", "#334155"),
+            hover_color=("gray65", "#475569"),
+            text_color=("gray10", "white"),
             command=self.destroy
         )
         self.btn_cancel.pack(side="left")
 
     def start_update(self):
         if not self.download_url:
-            self.status_lbl.configure(text="تعذر العثور على ملف التحديث في خوادم GitHub", text_color="#EF4444")
+            self.status_lbl.configure(text="تعذر العثور على ملف التحديث في خوادم GitHub", text_color=("#DC2626", "#EF4444"))
             return
 
         self.btn_install.configure(state="disabled", text="جاري التنزيل...")
         self.btn_cancel.configure(state="disabled")
-        self.status_lbl.configure(text="جاري تنزيل النسخة الجديدة من GitHub...", text_color="#38BDF8")
+        self.status_lbl.configure(text="جاري تنزيل النسخة الجديدة من GitHub...", text_color=("#0284C7", "#38BDF8"))
         self.progress_bar.set(0)
 
         def _prog(pct):
@@ -233,7 +234,7 @@ class UpdateModal(ctk.CTkToplevel):
         if success:
             self.status_lbl.configure(
                 text="✓ تم التنزيل! سيتم إغلاق التطبيق وتثبيت النسخة الجديدة تلقائياً...",
-                text_color="#10B981"
+                text_color=("#059669", "#10B981")
             )
             self.pct_lbl.configure(text="100%")
             self.btn_install.configure(state="disabled")
@@ -242,7 +243,7 @@ class UpdateModal(ctk.CTkToplevel):
             # replace the locked exe and relaunch the new version.
             self.after(1200, self._exit_for_update)
         else:
-            self.status_lbl.configure(text=f"فشل التحديث: {msg}", text_color="#EF4444")
+            self.status_lbl.configure(text=f"فشل التحديث: {msg}", text_color=("#DC2626", "#EF4444"))
             self.btn_install.configure(state="normal", text="إعادة المحاولة | Retry")
             self.btn_cancel.configure(state="normal")
 

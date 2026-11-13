@@ -64,7 +64,11 @@ cd Waraqat
 
 ### 2. تثبيت الحزم المطلوبة (Install Requirements)
 ```bash
+# لتشغيل التطبيق فقط
 pip install -r requirements.txt
+
+# للتطوير والاختبارات والبناء (تتضمن pytest و PyInstaller)
+pip install -r requirements-dev.txt
 ```
 
 ### 3. تشغيل التطبيق
@@ -72,7 +76,13 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 4. بناء ملف تنفيذي (.exe) بنقرة واحدة
+### 4. تشغيل الاختبارات (Tests)
+```bash
+python -m pytest
+```
+تعمل الاختبارات تلقائياً عبر GitHub Actions عند كل push أو pull request.
+
+### 5. بناء ملف تنفيذي (.exe) بنقرة واحدة
 يحتوي المشروع على سكربت نشر وبناء آلي:
 ```bash
 # تشغيل سكربت النشر الآلي

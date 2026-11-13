@@ -1,13 +1,22 @@
 REM Build script for Waraqat
 @echo off
-cd C:\Users\Administrator\Desktop\UniversalDownloader
-pyinstaller --noconfirm --onefile --windowed ^
+setlocal
+cd /d "%~dp0"
+
+python -m PyInstaller --noconfirm --onefile --windowed ^
   --icon=assets\waraqat_icon.ico ^
   --name=Waraqat ^
   --add-data "assets;assets" ^
   --collect-all customtkinter ^
-  --collect-all arabic_reshaper ^
   --collect-all plyer ^
   main.py
+
+if %ERRORLEVEL% NEQ 0 (
+  echo.
+  echo [ERROR] Build failed. Check the PyInstaller output above.
+  pause
+  exit /b 1
+)
+
 echo ---- BUILD DONE ----
 pause

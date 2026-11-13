@@ -18,7 +18,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :: 2. Check if required libraries are installed
-python -c "import requests, bs4, customtkinter, PIL, arabic_reshaper, bidi, tqdm" >nul 2>&1
+python -c "import requests, bs4, customtkinter, PIL, tqdm, plyer" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ==============================================================

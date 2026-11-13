@@ -2,7 +2,6 @@ import os
 import re
 import time
 import requests
-from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -23,8 +22,6 @@ HEADERS = {
 CONNECT_TIMEOUT = 10
 MAX_READ_TIMEOUT = 20
 CHUNK_SIZE = 65536
-
-print_lock = Lock()
 
 
 def _build_timeout(timeout):
@@ -63,10 +60,15 @@ def _existing_part_size(filepath):
         if size <= 0:
             _remove_file(filepath)
             return 0
+
+        is_html = False
         with open(filepath, "rb") as f:
-            if _looks_like_html(f.read(512)):
-                _remove_file(filepath)
-                return 0
+            is_html = _looks_like_html(f.read(512))
+
+        # Remove after the file is closed: Windows cannot delete an open file.
+        if is_html:
+            _remove_file(filepath)
+            return 0
         return size
     except OSError:
         _remove_file(filepath)

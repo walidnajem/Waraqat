@@ -196,7 +196,7 @@ def resolve_mediafire(url):
     return None
 
 
-def extract_files(url, extractor_type=None):
+def extract_files(url):
     """
     Universally extracts downloadable documents (PDF, Word, PPT, EPUB) and cloud links
     from any web page or direct URL.
@@ -251,33 +251,15 @@ def extract_files(url, extractor_type=None):
         return _extract_archive_org(url)
 
     # -------------------------------------------------------------
-    # CASE 5: Mega.nz — encrypted, needs special SDK
+    # CASE 5: Mega.nz — encrypted links are not supported yet
     # -------------------------------------------------------------
     if "mega.nz" in parsed_input.netloc.lower() or "mega.co.nz" in parsed_input.netloc.lower():
-        return [{
-            "type": "MEGA",
-            "url": url,
-            "title": "Mega.nz_File (يتطلب دعم خاص)"
-        }]
+        raise ValueError(
+            "MEGA links are not supported yet. | روابط MEGA غير مدعومة حالياً."
+        )
 
     # -------------------------------------------------------------
-    # CASE 6: AlManahij (almanahj.com)
-    # almanahj uses direct PDF download links, universal extractor works
-    # but we enhance title extraction from their specific HTML structure
-    # -------------------------------------------------------------
-    # if "almanahj.com" in parsed_input.netloc.lower():
-    #     pass  # Falls through to universal extractor with enhanced title detection
-
-    # -------------------------------------------------------------
-    # CASE 7: Alloschool (alloschool.com)
-    # Moroccan educational platform — pages contain embedded PDFs and
-    # download links. The universal extractor handles it well.
-    # -------------------------------------------------------------
-    # if "alloschool.com" in parsed_input.netloc.lower():
-    #     pass  # Falls through to universal extractor
-
-    # -------------------------------------------------------------
-    # Fetch web page
+    # CASE 6: Universal web page — fetch and scan for document links
     # -------------------------------------------------------------
     try:
         response = requests.get(

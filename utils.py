@@ -1,7 +1,6 @@
 import os
 import re
-import arabic_reshaper
-from bidi.algorithm import get_display
+from urllib.parse import urlparse
 
 # Device names that Windows reserves regardless of extension.
 WINDOWS_RESERVED_NAMES = {
@@ -14,12 +13,15 @@ MAX_FILENAME_CHARS = 120
 DEFAULT_MAX_PATH = 240
 
 
-def ar(text):
-    """Reshapes Arabic text for proper display in RTL contexts."""
+def get_site_name(url):
+    """Returns a clean domain name for display, without the www. prefix."""
     try:
-        return get_display(arabic_reshaper.reshape(str(text)))
+        domain = urlparse(str(url)).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain or "Universal Scanner"
     except Exception:
-        return str(text)
+        return "General Website"
 
 
 def clean_filename(text):
@@ -89,11 +91,3 @@ def fit_filename(folder, filename, max_path=DEFAULT_MAX_PATH):
     keep = max(1, available - 3)
     shortened = stem[:keep].rstrip('. ') + "..."
     return shortened + ext
-
-
-def safe_print(text):
-    """Safely prints text with Arabic reshaping if possible."""
-    try:
-        print(ar(text))
-    except Exception:
-        print(text)

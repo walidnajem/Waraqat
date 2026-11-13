@@ -16,10 +16,9 @@ from config import (
     load_settings,
     save_settings
 )
-from site_detector import detect_site
 from extractor import extract_files, extract_files_batch
 from downloader import download_parallel
-from utils import clean_filename
+from utils import clean_filename, get_site_name
 from notifications import notify_download_complete, notify_error
 
 ctk.set_appearance_mode("dark")
@@ -40,9 +39,7 @@ TYPE_COLORS = {
     "PPTX": "#EA580C",      # Orange
     "PPT": "#EA580C",       # Orange
     "EPUB": "#9333EA",      # Purple
-    "MEGA": "#D32F2F",      # Red (Mega brand)
     "DJVU": "#795548",      # Brown
-    "ARCHIVE": "#FF6F00",   # Orange (Archive.org brand)
 }
 
 
@@ -114,7 +111,7 @@ class NewFolderModal(ctk.CTkToplevel):
 
     def build_modal_ui(self):
         # Card container
-        card = ctk.CTkFrame(self, fg_color="#181B22", corner_radius=12, border_color="#334155", border_width=1)
+        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
         card.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Header with folder icon
@@ -133,7 +130,7 @@ class NewFolderModal(ctk.CTkToplevel):
             title_box,
             text="إنشاء مجلد جديد للتحميل | Create New Folder",
             font=("Segoe UI", 15, "bold"),
-            text_color="#F8FAFC"
+            text_color=("gray10", "#F8FAFC")
         )
         title.pack(anchor="w")
 
@@ -141,12 +138,12 @@ class NewFolderModal(ctk.CTkToplevel):
             title_box,
             text="سيتم حفظ الملفات المحملة داخل هذا المجلد تلقائياً",
             font=("Segoe UI", 11),
-            text_color="#94A3B8"
+            text_color=("gray40", "#94A3B8")
         )
         subtitle.pack(anchor="w")
 
         # Base directory option
-        options_frame = ctk.CTkFrame(card, fg_color="#12151C", corner_radius=8)
+        options_frame = ctk.CTkFrame(card, fg_color=("gray95", "#12151C"), corner_radius=8)
         options_frame.pack(fill="x", padx=15, pady=(5, 10))
 
         radio_downloads = ctk.CTkRadioButton(
@@ -174,7 +171,7 @@ class NewFolderModal(ctk.CTkToplevel):
             card,
             text="اسم المجلد الجديد | Folder Name:",
             font=("Segoe UI", 11, "bold"),
-            text_color="#E2E8F0"
+            text_color=("gray10", "#E2E8F0")
         )
         entry_label.pack(anchor="w", padx=15, pady=(2, 2))
 
@@ -183,8 +180,8 @@ class NewFolderModal(ctk.CTkToplevel):
             placeholder_text="مثال: روايات, امتحانات 2024, دروس الفيزياء...",
             height=38,
             font=("Segoe UI", 12),
-            fg_color="#12151C",
-            border_color="#475569"
+            fg_color=("white", "#12151C"),
+            border_color=("gray70", "#475569")
         )
         self.entry.pack(fill="x", padx=15, pady=(0, 8))
         self.entry.bind("<KeyRelease>", self.update_preview)
@@ -196,7 +193,7 @@ class NewFolderModal(ctk.CTkToplevel):
             card,
             text="مسار الحفظ النهائي: ...",
             font=("Consolas", 10),
-            text_color="#38BDF8",
+            text_color=("#0284C7", "#38BDF8"),
             wraplength=460,
             justify="left"
         )
@@ -223,8 +220,9 @@ class NewFolderModal(ctk.CTkToplevel):
             width=100,
             height=36,
             font=("Segoe UI", 11),
-            fg_color="#334155",
-            hover_color="#475569",
+            fg_color=("gray75", "#334155"),
+            hover_color=("gray65", "#475569"),
+            text_color=("gray10", "white"),
             command=self.destroy
         )
         cancel_btn.pack(side="left")
@@ -317,7 +315,7 @@ class SettingsModal(ctk.CTkToplevel):
 
     def build_ui(self):
         # Card container
-        card = ctk.CTkFrame(self, fg_color="#181B22", corner_radius=12, border_color="#334155", border_width=1)
+        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
         card.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Header with icon
@@ -379,8 +377,9 @@ class SettingsModal(ctk.CTkToplevel):
             width=85,
             height=34,
             font=("Segoe UI", 11),
-            fg_color="#334155",
-            hover_color="#475569",
+            fg_color=("gray75", "#334155"),
+            hover_color=("gray65", "#475569"),
+            text_color=("gray10", "white"),
             command=self._browse_folder
         )
         browse_btn.pack(side="left")
@@ -530,8 +529,9 @@ class SettingsModal(ctk.CTkToplevel):
             width=100,
             height=38,
             font=("Segoe UI", 11),
-            fg_color="#475569",
-            hover_color="#64748B",
+            fg_color=("gray75", "#475569"),
+            hover_color=("gray65", "#64748B"),
+            text_color=("gray10", "white"),
             command=self.destroy
         )
         cancel_btn.pack(side="left")
@@ -1197,7 +1197,7 @@ class App(ctk.CTk):
             text="0%",
             font=("Segoe UI", 11, "bold"),
             width=45,
-            text_color="#10B981"
+            text_color=("#059669", "#10B981")
         )
         self.progress_label.pack(side="right")
 
@@ -1325,7 +1325,7 @@ class App(ctk.CTk):
             lbl = ctk.CTkLabel(
                 self.scroll_files_frame,
                 text="No files found in scanned page(s). | لم يتم العثور على ملفات.",
-                text_color="#64748B"
+                text_color=("gray50", "#64748B")
             )
             lbl.pack(pady=20)
             return
@@ -1414,7 +1414,7 @@ class App(ctk.CTk):
             lbl = ctk.CTkLabel(
                 self.scroll_files_frame,
                 text="No matching files. | لا توجد ملفات مطابقة.",
-                text_color="#64748B"
+                text_color=("gray50", "#64748B")
             )
             lbl.pack(pady=20)
             return
@@ -1573,10 +1573,9 @@ class App(ctk.CTk):
             if len(urls) == 1:
                 url = urls[0]
                 self.log(f"[*] Scanning webpage: {url}")
-                detection = detect_site(url)
-                self.log(f"[*] Domain detected: {detection['site']}")
+                site_name = get_site_name(url)
+                self.log(f"[*] Domain detected: {site_name}")
                 files = extract_files(url)
-                site_name = detection["site"]
             else:
                 self.log(f"[*] Starting Batch Scan on {len(urls)} pages...")
                 files = extract_files_batch(urls, self.log)
