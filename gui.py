@@ -294,10 +294,14 @@ class SettingsModal(ctk.CTkToplevel):
                 pass
 
         self.transient(parent)
-        self.grab_set()
 
         self.build_ui()
         self.center_window()
+        self.update_idletasks()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
 
     def center_window(self):
         self.update_idletasks()

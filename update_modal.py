@@ -30,7 +30,6 @@ class UpdateResultModal(ctk.CTkToplevel):
                 pass
 
         self.transient(parent)
-        self.grab_set()
 
         card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12,
                             border_color=("gray75", "#334155"), border_width=1)
@@ -108,10 +107,14 @@ class UpdateModal(ctk.CTkToplevel):
                 pass
 
         self.transient(parent)
-        self.grab_set()
 
         self.build_ui()
         self.center_window()
+        self.update_idletasks()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
         self._poll_job = self.after(100, self._poll_events)
 
     def center_window(self):
