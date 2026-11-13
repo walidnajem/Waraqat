@@ -222,6 +222,22 @@ def build_command():
     return build_cmd
 
 
+def run_tests():
+    """Runs the pytest suite before building; aborts on failure."""
+    log_step("Running pytest test suite before build...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        log_error("pytest failed. Fix the tests before publishing.")
+        sys.exit(1)
+    log_success("All tests passed.")
+
+
 def build_executable():
     """Builds dist/Waraqat.exe from the current source tree."""
     build_cmd = build_command()
@@ -258,6 +274,7 @@ def main():
     print(f"{CYAN}===================================================={RESET}")
 
     preflight_checks()
+    run_tests()
 
     current_ver = get_current_version()
     print(f"Current version in config.py: {YELLOW}v{current_ver}{RESET}")

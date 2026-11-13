@@ -2,7 +2,7 @@ import os
 import queue
 import threading
 from auto_updater import check_for_update
-from update_modal import UpdateModal
+from update_modal import UpdateModal, UpdateResultModal
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -756,32 +756,36 @@ class App(ctk.CTk):
         if not self.settings.get("auto_check_updates", True):
             return
 
-        def _callback(latest_tag, download_url, release_notes=""):
+        def _callback(latest_tag, download_url, release_notes="", sha256=None):
             self.event_queue.put({
                 "type": "update_result",
                 "latest_tag": latest_tag,
                 "download_url": download_url,
                 "release_notes": release_notes,
+                "sha256": sha256,
                 "manual": False,
             })
 
-        check_for_update(_callback)
+        check_for_update(_callback, allow_skipped=False,
+                         skipped_version=self.settings.get("skipped_update_version"))
 
     def manual_check_updates(self):
         """Triggered manually by user clicking 'Check for Updates' button."""
         self.update_btn.configure(state="disabled", text="جاري الفحص...")
         self.log("[*] Checking GitHub repository for latest updates...")
 
-        def _callback(latest_tag, download_url, release_notes=""):
+        def _callback(latest_tag, download_url, release_notes="", sha256=None):
             self.event_queue.put({
                 "type": "update_result",
                 "latest_tag": latest_tag,
                 "download_url": download_url,
                 "release_notes": release_notes,
+                "sha256": sha256,
                 "manual": True,
             })
 
-        check_for_update(_callback)
+        check_for_update(_callback, allow_skipped=True,
+                         skipped_version=self.settings.get("skipped_update_version"))
 
     def build_ui(self):
         # ----------------------------------
@@ -1441,6 +1445,14 @@ class App(ctk.CTk):
     # ----------------------------------
     # Event Queue Processing
     # ----------------------------------
+    def _skip_update(self, version_tag):
+        self.settings["skipped_update_version"] = version_tag
+        try:
+            save_settings(self.settings)
+        except Exception:
+            pass
+        self.log(f"[*] Skipped version {version_tag}. | تم تخطي الإصدار {version_tag}.")
+
     def process_events(self):
         while True:
             try:
@@ -1493,6 +1505,7 @@ class App(ctk.CTk):
                     latest_tag = event.get("latest_tag")
                     download_url = event.get("download_url")
                     release_notes = event.get("release_notes", "")
+                    sha256 = event.get("sha256")
 
                     if manual:
                         self.update_btn.configure(state="normal", text="فحص التحديثات | Updates")
@@ -1500,14 +1513,37 @@ class App(ctk.CTk):
                     if latest_tag and download_url:
                         if manual:
                             self.log(f"[+] Update available: {latest_tag}")
-                        UpdateModal(self, latest_tag, download_url, release_notes)
+                        UpdateModal(self, latest_tag, download_url, release_notes, sha256=sha256,
+                                   skip_callback=self._skip_update)
                     elif manual:
-                        if release_notes == "up_to_date":
+                        status = release_notes or ""
+                        if status == "up_to_date":
                             self.log("[+] Waraqat is up to date! (أنت تستخدم أحدث إصدار)")
-                        elif release_notes == "no_asset":
+                            UpdateResultModal(self, "محدّث | Up to date",
+                                             "أنت تستخدم أحدث إصدار من ورقات.\nYou are using the latest version of Waraqat.",
+                                             "info")
+                        elif status == "skipped":
+                            self.log("[*] This version was skipped. | تم تخطي هذا الإصدار.")
+                        elif status == "no_asset":
                             self.log("[!] The latest release does not include a Waraqat.exe asset.")
+                            UpdateResultModal(self, "لا يوجد ملف تحديث | No update file",
+                                             "الإصدار الأحدث لا يحتوي على ملف Waraqat.exe.\nThe latest release has no Waraqat.exe asset.",
+                                             "warn")
+                        elif status == "rate_limit":
+                            self.log("[!] GitHub rate limit reached.")
+                            UpdateResultModal(self, "حد GitHub | Rate limit",
+                                             "تم تجاوز حد طلبات GitHub. حاول لاحقاً.\nGitHub rate limit reached. Try again later.",
+                                             "error")
+                        elif status == "not_found":
+                            self.log("[!] Release not found.")
+                            UpdateResultModal(self, "غير موجود | Not found",
+                                             "لم يتم العثور على الإصدار.\nRelease not found.",
+                                             "error")
                         else:
                             self.log("[!] Unable to reach GitHub releases or check updates.")
+                            UpdateResultModal(self, "فشل الفحص | Check failed",
+                                             "تعذر الوصول إلى GitHub أو فحص التحديثات.\nUnable to reach GitHub releases.",
+                                             "error")
 
             except queue.Empty:
                 break

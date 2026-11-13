@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Waraqat - ورقات
 cd /d "%~dp0"
 set PYTHONUTF8=1

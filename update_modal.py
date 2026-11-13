@@ -11,6 +11,70 @@ BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
 
+class UpdateResultModal(ctk.CTkToplevel):
+    """Small theme-aware dialog used for update-check feedback (no download)."""
+
+    def __init__(self, parent, title, message, kind="info"):
+        super().__init__(parent)
+        self.parent = parent
+        self.title(title)
+        self.geometry("420x220")
+        self.minsize(360, 180)
+        self.resizable(False, False)
+
+        ico_path = os.path.join(ASSETS_DIR, "waraqat_icon.ico")
+        if os.path.exists(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
+
+        self.transient(parent)
+        self.grab_set()
+
+        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12,
+                            border_color=("gray75", "#334155"), border_width=1)
+        card.pack(fill="both", expand=True, padx=15, pady=15)
+
+        color = "#2563EB" if kind == "info" else "#D97706" if kind == "warn" else "#DC2626"
+        lbl_title = ctk.CTkLabel(card, text=title, font=("Segoe UI", 14, "bold"),
+                                 text_color=color)
+        lbl_title.pack(pady=(16, 6))
+
+        lbl_msg = ctk.CTkLabel(card, text=message, font=("Segoe UI", 11),
+                               text_color=("gray10", "#E2E8F0"), wraplength=360,
+                               justify="center")
+        lbl_msg.pack(pady=(4, 12), padx=12)
+
+        btn = ctk.CTkButton(card, text="OK | حسناً", width=120, height=34,
+                            fg_color="#4F46E5", hover_color="#4338CA",
+                            command=self.destroy)
+        btn.pack(pady=(4, 16))
+
+        self.center_window()
+        self.after(100, self._grab)
+
+    def center_window(self):
+        self.update_idletasks()
+        try:
+            pw = self.parent.winfo_width()
+            ph = self.parent.winfo_height()
+            px = self.parent.winfo_rootx()
+            py = self.parent.winfo_rooty()
+            w, h = 420, 220
+            x = px + (pw - w) // 2
+            y = py + (ph - h) // 2
+            self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
+        except Exception:
+            pass
+
+    def _grab(self):
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+
+
 class UpdateModal(ctk.CTkToplevel):
     """
     نافذة تحديث حديثة واحترافية متناسقة كلياً مع تصميم Waraqat
@@ -19,13 +83,15 @@ class UpdateModal(ctk.CTkToplevel):
     - شريط تقدم مباشر مع النسبة المئوية
     - إمكانية التنزيل الذاتي والتثبيت التلقائي مع إعادة التشغيل
     """
-    def __init__(self, parent, version_tag, download_url, release_notes=""):
+    def __init__(self, parent, version_tag, download_url, release_notes="", sha256=None, skip_callback=None):
         super().__init__(parent)
         self.parent = parent
         self.version_tag = version_tag
         self.download_url = download_url
         self.release_notes = release_notes or "تحسينات عامة في الأداء وإصلاحات لمشاكل الاستقرار."
         # Worker callbacks are pushed here and handled on the Tk main thread only.
+        self.sha256 = sha256
+        self.skip_callback = skip_callback
         self._events = queue.Queue()
 
         self.title("تحديث ورقات | Waraqat Auto-Update")
@@ -183,6 +249,19 @@ class UpdateModal(ctk.CTkToplevel):
             text_color=("gray10", "white"),
             command=self.destroy
         )
+        self.btn_skip = ctk.CTkButton(
+            self.btn_frame,
+            text="تخطي | Skip",
+            width=90,
+            height=38,
+            font=("Segoe UI", 11),
+            fg_color=("gray75", "#475569"),
+            hover_color=("gray65", "#64748B"),
+            text_color=("gray10", "white"),
+            command=self._skip
+        )
+        self.btn_skip.pack(side="left", padx=(0, 6))
+
         self.btn_cancel.pack(side="left")
 
     def start_update(self):
@@ -201,7 +280,16 @@ class UpdateModal(ctk.CTkToplevel):
         def _done(success, msg):
             self._events.put(("done", (success, msg)))
 
-        download_and_install(self.download_url, progress_callback=_prog, done_callback=_done)
+        download_and_install(self.download_url, progress_callback=_prog, done_callback=_done,
+                            expected_sha256=self.sha256)
+
+    def _skip(self):
+        if self.skip_callback:
+            try:
+                self.skip_callback(self.version_tag)
+            except Exception:
+                pass
+        self.destroy()
 
     def _poll_events(self):
         """Drains worker events on the Tk main thread."""
