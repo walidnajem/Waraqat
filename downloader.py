@@ -347,7 +347,7 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
         if log_callback:
             log_callback(f"[SKIP] (Already exists) -> {filename}")
         if item_callback:
-            item_callback(file_idx, "skip", 100.0)
+            item_callback(file_idx, "skip", 100.0, 0, 0, filepath)
         return "skip"
 
     if log_callback:

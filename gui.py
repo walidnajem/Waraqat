@@ -618,8 +618,22 @@ class SettingsModal(ctk.CTkToplevel):
 
         # Automation
         self._settings["proxy"] = self.proxy_entry.get().strip()
+        self._settings["restore_queue_on_start"] = self.var_restore_queue.get()
         self._settings["open_folder_on_finish"] = self.var_open_folder.get()
         self._settings["auto_check_updates"] = self.var_auto_update.get()
+        self.var_restore_queue = ctk.BooleanVar(value=self._settings.get("restore_queue_on_start", False))
+        cb_restore = ctk.CTkCheckBox(
+            sec4,
+            text="استعادة آخر فحص عند بدء التطبيق | Restore last scan on startup",
+            variable=self.var_restore_queue,
+            width=22,
+            checkbox_width=18,
+            checkbox_height=18,
+            fg_color="#4F46E5",
+            hover_color="#4338CA"
+        )
+        cb_restore.pack(anchor="w", pady=(6, 0))
+
         self._settings["notifications_enabled"] = self.var_notifications.get()
 
         self._on_save(self._settings)
@@ -696,6 +710,19 @@ class DownloadItem(ctk.CTkFrame):
         )
         self.status_lbl.pack(side="right")
 
+        self.open_btn = ctk.CTkButton(
+            top_row,
+            text="👁",
+            width=28,
+            height=22,
+            font=("Segoe UI", 11),
+            fg_color=("gray80", "#1E293B"),
+            hover_color=("gray70", "#334155"),
+            text_color=("gray10", "white"),
+            command=self._open_file
+        )
+        self.open_btn.pack(side="right", padx=(4, 0))
+
         self.thumb_label = ctk.CTkLabel(self, text="", width=48, height=64)
         self.thumb_label.pack(side="right", padx=(8, 10), pady=(0, 6))
         self.thumb_label.bind("<Button-1>", lambda e: self._open_file())
@@ -768,6 +795,11 @@ class DownloadItem(ctk.CTkFrame):
             self.progress_bar.configure(progress_color="#10B981")
             self.progress_bar.set(1.0)
         elif status == "skip":
+            if filepath:
+                self._thumb_filepath = filepath
+                if _HAS_PDF_PREVIEW and str(filepath).lower().endswith(".pdf"):
+                    import threading
+                    threading.Thread(target=self._render_thumbnail, args=(filepath,), daemon=True).start()
             self.configure(border_color=("gray75", "#334155"), fg_color=("gray95", "#161922"))
             self.status_lbl.configure(text="Exists (Skip)", text_color=("gray50", "#94A3B8"))
             self.progress_bar.set(1.0)
@@ -1728,6 +1760,9 @@ class App(ctk.CTk):
                     idx = event["index"]
                     status = event["status"]
                     pct = event["percent"]
+                    downloaded = event.get("downloaded", 0)
+                    total = event.get("total", 0)
+                    filepath = event.get("filepath")
                     if idx in self.download_item_widgets:
                         self.download_item_widgets[idx].update_state(status, pct, downloaded, total, filepath)
 
