@@ -1,5 +1,4 @@
 import os
-import json
 import queue
 import threading
 try:
@@ -39,12 +38,11 @@ from config import (
     APP_VERSION,
     DEFAULT_DOWNLOAD_FOLDER,
     load_settings,
-    save_settings,
-    QUEUE_FILE
+    save_settings
 )
 from extractor import extract_files, extract_files_batch
 from downloader import download_parallel
-from utils import clean_filename, get_site_name
+from utils import clean_filename, fit_filename, get_site_name
 from notifications import notify_download_complete, notify_error
 
 ctk.set_appearance_mode("dark")
@@ -618,22 +616,8 @@ class SettingsModal(ctk.CTkToplevel):
 
         # Automation
         self._settings["proxy"] = self.proxy_entry.get().strip()
-        self._settings["restore_queue_on_start"] = self.var_restore_queue.get()
         self._settings["open_folder_on_finish"] = self.var_open_folder.get()
         self._settings["auto_check_updates"] = self.var_auto_update.get()
-        self.var_restore_queue = ctk.BooleanVar(value=self._settings.get("restore_queue_on_start", False))
-        cb_restore = ctk.CTkCheckBox(
-            sec4,
-            text="استعادة آخر فحص عند بدء التطبيق | Restore last scan on startup",
-            variable=self.var_restore_queue,
-            width=22,
-            checkbox_width=18,
-            checkbox_height=18,
-            fg_color="#4F46E5",
-            hover_color="#4338CA"
-        )
-        cb_restore.pack(anchor="w", pady=(6, 0))
-
         self._settings["notifications_enabled"] = self.var_notifications.get()
 
         self._on_save(self._settings)
@@ -649,12 +633,13 @@ class DownloadItem(ctk.CTkFrame):
     - Per-file interactive progress bar
     - Dynamic status indicator (Waiting, % Progress, Done, Skipped, Error)
     """
-    def __init__(self, master, index, item, var):
+    def __init__(self, master, index, item, var, open_resolver=None):
         super().__init__(master, fg_color=("white", "#181B22"), corner_radius=8, border_color=("gray75", "#252A36"), border_width=1)
         self.pack(fill="x", padx=4, pady=3)
         self.index = index
         self.item = item
         self.var = var
+        self._open_resolver = open_resolver
 
         # Main top row container
         top_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -742,11 +727,24 @@ class DownloadItem(ctk.CTkFrame):
 
     def _open_file(self):
         path = getattr(self, "_thumb_filepath", None)
+        # The file may already exist on disk even if this item was never
+        # downloaded during the current session (or the preview is still
+        # rendering). Resolve its expected path as a fallback.
+        if (not path or not os.path.exists(path)) and self._open_resolver:
+            try:
+                path = self._open_resolver()
+            except Exception:
+                path = None
         if path and os.path.exists(path):
             try:
                 os.startfile(path)
+                return
             except Exception:
                 pass
+        try:
+            self.status_lbl.configure(text="Download first | نزّل أولاً", text_color="#D97706")
+        except Exception:
+            pass
 
     def _render_thumbnail(self, filepath):
         if not _HAS_PDF_PREVIEW or not filepath or not os.path.exists(filepath):
@@ -896,8 +894,6 @@ class App(ctk.CTk):
         """Called after the UI is constructed.
         Initiates an asynchronous check for new releases in the background if enabled in settings.
         """
-        if self.settings.get("restore_queue_on_start", True):
-            self._restore_queue()
         if not self.settings.get("auto_check_updates", True):
             return
 
@@ -1402,28 +1398,25 @@ class App(ctk.CTk):
             for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
                 os.environ.pop(key, None)
 
-    def _save_queue(self):
+    def _expected_file_path(self, item, index):
+        """Returns the path where an item is (or would be) downloaded."""
         try:
-            os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
-            with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.files, f, ensure_ascii=False, indent=2)
+            folder = self.folder_entry.get().strip() or self.selected_save_path
+            try:
+                # Keep the number shown in the checklist, exactly like the
+                # downloader does.
+                file_idx = int(item.get("orig_index", index))
+            except (TypeError, ValueError):
+                file_idx = index
+            raw_type = item.get("type", "PDF").upper()
+            ext = raw_type.lower()
+            if ext in ("gdrive", "mediafire"):
+                ext = "pdf"
+            title = clean_filename(item.get("title", f"Document_{index}"))
+            filename = fit_filename(folder, f"{file_idx:02d}_{title}.{ext}")
+            return os.path.join(folder, filename)
         except Exception:
-            pass
-
-    def _restore_queue(self):
-        try:
-            if not os.path.exists(QUEUE_FILE):
-                return
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list) and data:
-                self.files = data
-                self.update_file_checklist(self.files)
-                self.site_label.configure(text="Domain | الموقع: Restored queue")
-                self.files_label.configure(text=f"Files | الملفات المكتشفة: {len(data)}")
-                self.log(f"[*] Restored {len(data)} files from saved queue.")
-        except Exception:
-            pass
+            return None
 
     def _enable_dnd(self):
         """Enables drag & drop of text/URLs onto the URL and batch inputs."""
@@ -1624,7 +1617,10 @@ class App(ctk.CTk):
             self.checkbox_vars.append(var)
 
             # Create interactive DownloadItem widget
-            item_widget = DownloadItem(self.scroll_files_frame, i, item, var)
+            item_widget = DownloadItem(
+                self.scroll_files_frame, i, item, var,
+                open_resolver=lambda it=item, idx=i: self._expected_file_path(it, idx)
+            )
             self.download_item_widgets[i] = item_widget
 
     def _toggle_type_filter(self, type_key):
@@ -1716,7 +1712,10 @@ class App(ctk.CTk):
                 self.file_vars[orig_idx_0] = var
             self.checkbox_vars.append(var)
 
-            item_widget = DownloadItem(self.scroll_files_frame, orig_idx_1, item, var)
+            item_widget = DownloadItem(
+                self.scroll_files_frame, orig_idx_1, item, var,
+                open_resolver=lambda it=item, idx=orig_idx_1: self._expected_file_path(it, idx)
+            )
             self.download_item_widgets[orig_idx_1] = item_widget
 
     def select_all_files(self):
@@ -1773,7 +1772,6 @@ class App(ctk.CTk):
                     self.site_label.configure(text=f"Domain | الموقع: {site}")
                     self.files_label.configure(text=f"Files | الملفات المكتشفة: {count}")
                     self.update_file_checklist(self.files)
-                    self._save_queue()
                     self.analyze_btn.configure(state="normal", text="Analyze | فحص الروابط")
                     self.download_btn.configure(state="normal")
                     self.is_working = False
@@ -1844,7 +1842,10 @@ class App(ctk.CTk):
             "type": "item_progress",
             "index": index,
             "status": status,
-            "percent": percent
+            "percent": percent,
+            "downloaded": downloaded,
+            "total": total,
+            "filepath": filepath
         })
 
     def log(self, text):
