@@ -5,3 +5,6 @@ tqdm
 pillow
 plyer
 winotify
+tkinterdnd2
+pystray
+PyMuPDF

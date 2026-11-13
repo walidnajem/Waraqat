@@ -4,7 +4,7 @@ import json
 
 APP_NAME = "Waraqat | ورقات"
 APP_SUBTITLE = "المنظومة الذكية لسحب وتنزيل المستندات والكتب"
-APP_VERSION = "0.4.6"
+APP_VERSION = "0.4.7"
 
 DEFAULT_MAX_WORKERS = 5
 TIMEOUT = 60
@@ -27,6 +27,7 @@ else:
     APP_STORAGE_DIR = os.path.join(os.path.expanduser("~"), ".waraqat")
 
 SETTINGS_FILE = os.path.join(APP_STORAGE_DIR, "settings.json")
+QUEUE_FILE = os.path.join(APP_STORAGE_DIR, "queue.json")
 
 
 def load_settings():
@@ -39,7 +40,9 @@ def load_settings():
         "open_folder_on_finish": True,
         "auto_check_updates": True,
         "timeout": TIMEOUT,
-        "notifications_enabled": True
+        "notifications_enabled": True,
+        "proxy": "",
+        "restore_queue_on_start": True
     }
 
     source = None

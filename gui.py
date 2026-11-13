@@ -1,6 +1,31 @@
 import os
+import json
 import queue
 import threading
+try:
+    from tkinterdnd2 import TkinterDnD, DND_TEXT, DND_FILES
+    _HAS_DND = True
+except Exception:
+    _HAS_DND = False
+    TkinterDnD = None
+    DND_TEXT = None
+    DND_FILES = None
+try:
+    import warnings
+    warnings.filterwarnings("ignore", category=FutureWarning, module="fitz")
+    import fitz as _fitz
+    _HAS_PDF_PREVIEW = True
+except Exception:
+    _HAS_PDF_PREVIEW = False
+    _fitz = None
+try:
+    import pystray
+    from PIL import Image as _PILImage
+    _HAS_TRAY = True
+except Exception:
+    _HAS_TRAY = False
+    pystray = None
+    _PILImage = None
 from auto_updater import check_for_update
 from update_modal import UpdateModal, UpdateResultModal
 from tkinter import filedialog
@@ -14,7 +39,8 @@ from config import (
     APP_VERSION,
     DEFAULT_DOWNLOAD_FOLDER,
     load_settings,
-    save_settings
+    save_settings,
+    QUEUE_FILE
 )
 from extractor import extract_files, extract_files_batch
 from downloader import download_parallel
@@ -446,7 +472,27 @@ class SettingsModal(ctk.CTkToplevel):
         self.timeout_menu.set(timeout_match)
         self.timeout_menu.pack(side="left")
 
+        # --- Section 2b: Proxy (optional) ---
+        sec2b = ctk.CTkFrame(content, fg_color="transparent")
+        sec2b.pack(fill="x", padx=14, pady=(8, 4))
+
+        ctk.CTkLabel(
+            sec2b,
+            text="🌐 Proxy (اختياري | optional):",
+            font=("Segoe UI", 11, "bold")
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.proxy_entry = ctk.CTkEntry(
+            sec2b,
+            placeholder_text="http://user:pass@host:port  (اتركه فارغاً لتعطيله)",
+            height=32,
+            font=("Segoe UI", 11)
+        )
+        self.proxy_entry.pack(fill="x")
+        self.proxy_entry.insert(0, self._settings.get("proxy", "") or "")
+
         # --- Section 3: Appearance & Theme ---
+
         sec3 = ctk.CTkFrame(content, fg_color="transparent")
         sec3.pack(fill="x", padx=14, pady=8)
 
@@ -571,6 +617,7 @@ class SettingsModal(ctk.CTkToplevel):
         ctk.set_appearance_mode(raw_theme)
 
         # Automation
+        self._settings["proxy"] = self.proxy_entry.get().strip()
         self._settings["open_folder_on_finish"] = self.var_open_folder.get()
         self._settings["auto_check_updates"] = self.var_auto_update.get()
         self._settings["notifications_enabled"] = self.var_notifications.get()
@@ -649,6 +696,12 @@ class DownloadItem(ctk.CTkFrame):
         )
         self.status_lbl.pack(side="right")
 
+        self.thumb_label = ctk.CTkLabel(self, text="", width=48, height=64)
+        self.thumb_label.pack(side="right", padx=(8, 10), pady=(0, 6))
+        self.thumb_label.bind("<Button-1>", lambda e: self._open_file())
+        self._thumb_filepath = None
+        self._thumb_image = None
+
         # Per-file sleek progress bar (visible when downloading or completed)
         self.progress_bar = ctk.CTkProgressBar(
             self,
@@ -660,16 +713,56 @@ class DownloadItem(ctk.CTkFrame):
         self.progress_bar.pack(fill="x", padx=10, pady=(0, 6))
         self.progress_bar.set(0)
 
-    def update_state(self, status, percent=0.0):
+    def _open_file(self):
+        path = getattr(self, "_thumb_filepath", None)
+        if path and os.path.exists(path):
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
+
+    def _render_thumbnail(self, filepath):
+        if not _HAS_PDF_PREVIEW or not filepath or not os.path.exists(filepath):
+            return
+        try:
+            doc = _fitz.open(filepath)
+            page = doc[0]
+            pix = page.get_pixmap(matrix=_fitz.Matrix(0.25, 0.25))
+            from PIL import Image as _PILImage
+            img = _PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(pix.width, pix.height))
+
+            def apply():
+                self._thumb_image = ctk_img
+                self._thumb_filepath = filepath
+                try:
+                    self.thumb_label.configure(image=ctk_img, text="")
+                except Exception:
+                    pass
+
+            self.after(0, apply)
+        except Exception:
+            pass
+
+    def update_state(self, status, percent=0.0, downloaded=0, total=0, filepath=None):
         if status == "downloading":
             self.configure(border_color="#4F46E5", fg_color=("#EEF2FF", "#1A1F2C"))
             self.status_lbl.configure(text=f"{int(percent)}%", text_color=("#2563EB", "#38BDF8"))
             self.progress_bar.configure(progress_color="#38BDF8")
             self.progress_bar.set(percent / 100.0)
         elif status == "progress":
-            self.status_lbl.configure(text=f"{int(percent)}%", text_color=("#2563EB", "#38BDF8"))
+            if total and total > 0:
+                txt = f"{int(percent)}% ({downloaded/1048576:.1f}/{total/1048576:.1f} MB)"
+            else:
+                txt = f"{int(percent)}%"
+            self.status_lbl.configure(text=txt, text_color=("#2563EB", "#38BDF8"))
             self.progress_bar.set(percent / 100.0)
         elif status == "success":
+            if filepath:
+                self._thumb_filepath = filepath
+                if _HAS_PDF_PREVIEW and str(filepath).lower().endswith(".pdf"):
+                    import threading
+                    threading.Thread(target=self._render_thumbnail, args=(filepath,), daemon=True).start()
             self.configure(border_color="#059669", fg_color=("#ECFDF5", "#14231E"))
             self.status_lbl.configure(text="Completed ✓", text_color="#059669")
             self.progress_bar.configure(progress_color="#10B981")
@@ -710,6 +803,7 @@ class App(ctk.CTk):
 
         # Load settings
         self.settings = load_settings()
+        self._apply_proxy(self.settings)
         self.selected_save_path = self.settings.get("save_path")
         if not self.selected_save_path or not os.path.exists(self.selected_save_path):
             self.selected_save_path = os.path.join(os.path.expanduser("~"), DEFAULT_DOWNLOAD_FOLDER)
@@ -749,6 +843,19 @@ class App(ctk.CTk):
         self.type_filter_buttons = {}  # type_name -> button widget
 
         self.build_ui()
+        self.bind_shortcuts()
+        if _HAS_DND:
+            try:
+                self.TkdndVersion = TkinterDnD._require(self)
+                self._enable_dnd()
+            except Exception:
+                pass
+        if _HAS_TRAY:
+            try:
+                self._setup_tray()
+            except Exception:
+                pass
+        self.protocol("WM_DELETE_WINDOW", self._on_close_to_tray)
         # بعد بناء الواجهة، نستدعي فحص التحديثات تلقائيًا
         self.after_ui_build()
         self.after(50, self.process_events)
@@ -757,6 +864,8 @@ class App(ctk.CTk):
         """Called after the UI is constructed.
         Initiates an asynchronous check for new releases in the background if enabled in settings.
         """
+        if self.settings.get("restore_queue_on_start", True):
+            self._restore_queue()
         if not self.settings.get("auto_check_updates", True):
             return
 
@@ -1241,6 +1350,146 @@ class App(ctk.CTk):
             if self.icon_sun:
                 self.theme_btn.configure(image=self.icon_sun)
         save_settings(self.settings)
+        self._apply_proxy(self.settings)
+
+    def bind_shortcuts(self):
+        """Registers global keyboard shortcuts for power users."""
+        self.bind_all("<Control-o>", lambda e: self.open_destination_folder())
+        self.bind_all("<Control-s>", lambda e: self.open_settings_dialog())
+        self.bind_all("<F5>", lambda e: self.analyze())
+        self.bind_all("<Control-u>", lambda e: self.manual_check_updates())
+
+    def _apply_proxy(self, settings):
+        proxy = (settings or {}).get("proxy", "") or ""
+        proxy = proxy.strip()
+        if proxy:
+            os.environ["HTTP_PROXY"] = proxy
+            os.environ["HTTPS_PROXY"] = proxy
+            os.environ["ALL_PROXY"] = proxy
+        else:
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                os.environ.pop(key, None)
+
+    def _save_queue(self):
+        try:
+            os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
+            with open(QUEUE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.files, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _restore_queue(self):
+        try:
+            if not os.path.exists(QUEUE_FILE):
+                return
+            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                self.files = data
+                self.update_file_checklist(self.files)
+                self.site_label.configure(text="Domain | الموقع: Restored queue")
+                self.files_label.configure(text=f"Files | الملفات المكتشفة: {len(data)}")
+                self.log(f"[*] Restored {len(data)} files from saved queue.")
+        except Exception:
+            pass
+
+    def _enable_dnd(self):
+        """Enables drag & drop of text/URLs onto the URL and batch inputs."""
+        targets = []
+        if hasattr(self, "url_entry"):
+            targets.append(self.url_entry)
+        if hasattr(self, "batch_textbox"):
+            targets.append(self.batch_textbox)
+        for widget in targets:
+            try:
+                widget.drop_target_register(DND_TEXT, DND_FILES)
+                widget.dnd_bind("<<Drop>>", self._on_drop)
+            except Exception:
+                pass
+
+    def _on_drop(self, event):
+        data = getattr(event, "data", "") or ""
+        # tkinterdnd2 wraps file lists in braces; extract plain text/urls.
+        text = data.strip()
+        if text.startswith("{") and text.endswith("}"):
+            text = text[1:-1]
+        # If a .txt file was dropped, read its contents.
+        if text.lower().endswith(".txt") and os.path.isfile(text):
+            try:
+                with open(text, "r", encoding="utf-8") as f:
+                    text = f.read()
+            except Exception:
+                pass
+        try:
+            if hasattr(self, "url_entry") and self.url_entry.winfo_containing(event.x_root, event.y_root) is self.url_entry:
+                self.url_entry.delete(0, "end")
+                self.url_entry.insert(0, text.strip().splitlines()[0] if text.strip() else "")
+                return
+        except Exception:
+            pass
+        try:
+            self.batch_textbox.delete("1.0", "end")
+            self.batch_textbox.insert("1.0", text)
+        except Exception:
+            pass
+
+    def _setup_tray(self):
+        self._tray_icon = None
+        self._quitting = False
+        icon_path = os.path.join(ASSETS_DIR, "logo.png")
+        try:
+            image = _PILImage.open(icon_path) if os.path.exists(icon_path) else _PILImage.new("RGB", (64, 64), (79, 70, 229))
+        except Exception:
+            image = _PILImage.new("RGB", (64, 64), (79, 70, 229))
+
+        def on_show(icon, item):
+            self.after(0, self._show_from_tray)
+
+        def on_quit(icon, item):
+            self._quitting = True
+            try:
+                icon.stop()
+            except Exception:
+                pass
+            self.after(0, self.destroy)
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Show Waraqat | إظهار", on_show, default=True),
+            pystray.MenuItem("Quit | خروج", on_quit),
+        )
+        self._tray_icon = pystray.Icon("Waraqat", image, "Waraqat | ورقات", menu)
+
+        def run_icon():
+            try:
+                self._tray_icon.run()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=run_icon, daemon=True).start()
+
+    def _show_from_tray(self):
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _on_close_to_tray(self):
+        if getattr(self, "_quitting", False):
+            try:
+                if getattr(self, "_tray_icon", None):
+                    self._tray_icon.stop()
+            except Exception:
+                pass
+            self.destroy()
+            return
+        # Hide to tray instead of closing.
+        try:
+            self.withdraw()
+        except Exception:
+            self.destroy()
 
     def open_settings_dialog(self):
         """Opens modern Settings modal dialog."""
@@ -1480,7 +1729,7 @@ class App(ctk.CTk):
                     status = event["status"]
                     pct = event["percent"]
                     if idx in self.download_item_widgets:
-                        self.download_item_widgets[idx].update_state(status, pct)
+                        self.download_item_widgets[idx].update_state(status, pct, downloaded, total, filepath)
 
                 elif event_type == "analyze_done":
                     site = event["site"]
@@ -1489,6 +1738,7 @@ class App(ctk.CTk):
                     self.site_label.configure(text=f"Domain | الموقع: {site}")
                     self.files_label.configure(text=f"Files | الملفات المكتشفة: {count}")
                     self.update_file_checklist(self.files)
+                    self._save_queue()
                     self.analyze_btn.configure(state="normal", text="Analyze | فحص الروابط")
                     self.download_btn.configure(state="normal")
                     self.is_working = False
@@ -1554,7 +1804,7 @@ class App(ctk.CTk):
 
         self.after(50, self.process_events)
 
-    def update_item_progress(self, index, status, percent=0.0):
+    def update_item_progress(self, index, status, percent=0.0, downloaded=0, total=0, filepath=None):
         self.event_queue.put({
             "type": "item_progress",
             "index": index,
@@ -1762,3 +2012,10 @@ class App(ctk.CTk):
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+
+
+if _HAS_DND:
+    try:
+        App.__bases__ = (ctk.CTk, TkinterDnD.DnDWrapper)
+    except Exception:
+        pass

@@ -357,7 +357,7 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
 
     def _chunk_cb(pct, downloaded, total_b):
         if item_callback:
-            item_callback(file_idx, "progress", pct)
+            item_callback(file_idx, "progress", pct, downloaded, total_b)
 
     for attempt in range(3):
         if cancel_event and cancel_event.is_set():
@@ -387,7 +387,7 @@ def download_file(index, total, item, folder, log_callback=None, cancel_event=No
             if log_callback:
                 log_callback(f"[OK] {filename} ({size_mb} MB at {speed_mb} MB/s)")
             if item_callback:
-                item_callback(file_idx, "success", 100.0)
+                item_callback(file_idx, "success", 100.0, 0, 0, filepath)
             return "success"
 
         except Exception as e:
