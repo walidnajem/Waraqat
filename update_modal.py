@@ -6,6 +6,7 @@ import customtkinter as ctk
 from PIL import Image
 from auto_updater import download_and_install
 from config import APP_VERSION
+from md3 import COLORS as M3, RADIUS, font as ui_font, center_on_parent, WavyProgressBar
 
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
@@ -16,6 +17,7 @@ class UpdateResultModal(ctk.CTkToplevel):
 
     def __init__(self, parent, title, message, kind="info"):
         super().__init__(parent)
+        self.configure(fg_color=M3["surface"])
         self.parent = parent
         self.title(title)
         self.geometry("420x220")
@@ -31,41 +33,39 @@ class UpdateResultModal(ctk.CTkToplevel):
 
         self.transient(parent)
 
-        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12,
-                            border_color=("gray75", "#334155"), border_width=1)
-        card.pack(fill="both", expand=True, padx=15, pady=15)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_high"],
+            corner_radius=RADIUS["xl"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
-        color = "#2563EB" if kind == "info" else "#D97706" if kind == "warn" else "#DC2626"
-        lbl_title = ctk.CTkLabel(card, text=title, font=("Segoe UI", 14, "bold"),
+        color = M3["primary"] if kind == "info" else M3["warning"] if kind == "warn" else M3["error"]
+        lbl_title = ctk.CTkLabel(card, text=title, font=ui_font(16, "bold"),
                                  text_color=color)
-        lbl_title.pack(pady=(16, 6))
+        lbl_title.pack(pady=(18, 6))
 
-        lbl_msg = ctk.CTkLabel(card, text=message, font=("Segoe UI", 11),
-                               text_color=("gray10", "#E2E8F0"), wraplength=360,
+        lbl_msg = ctk.CTkLabel(card, text=message, font=ui_font(11),
+                               text_color=M3["on_surface_variant"], wraplength=360,
                                justify="center")
         lbl_msg.pack(pady=(4, 12), padx=12)
 
-        btn = ctk.CTkButton(card, text="OK | حسناً", width=120, height=34,
-                            fg_color="#4F46E5", hover_color="#4338CA",
-                            command=self.destroy)
+        btn = ctk.CTkButton(
+            card, text="OK | حسناً", width=130, height=40,
+            corner_radius=RADIUS["pill"], font=ui_font(12, "bold"),
+            fg_color=M3["primary"], hover_color=M3["primary_hover"],
+            text_color=M3["on_primary"], border_width=0,
+            command=self.destroy
+        )
         btn.pack(pady=(4, 16))
 
         self.center_window()
         self.after(100, self._grab)
 
     def center_window(self):
-        self.update_idletasks()
-        try:
-            pw = self.parent.winfo_width()
-            ph = self.parent.winfo_height()
-            px = self.parent.winfo_rootx()
-            py = self.parent.winfo_rooty()
-            w, h = 420, 220
-            x = px + (pw - w) // 2
-            y = py + (ph - h) // 2
-            self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
-        except Exception:
-            pass
+        center_on_parent(self, self.parent, 420, 220)
 
     def _grab(self):
         try:
@@ -84,6 +84,7 @@ class UpdateModal(ctk.CTkToplevel):
     """
     def __init__(self, parent, version_tag, download_url, release_notes="", sha256=None, skip_callback=None):
         super().__init__(parent)
+        self.configure(fg_color=M3["surface"])
         self.parent = parent
         self.version_tag = version_tag
         self.download_url = download_url
@@ -94,8 +95,8 @@ class UpdateModal(ctk.CTkToplevel):
         self._events = queue.Queue()
 
         self.title("تحديث ورقات | Waraqat Auto-Update")
-        self.geometry("520x420")
-        self.minsize(480, 380)
+        self.geometry("520x500")
+        self.minsize(500, 480)
         self.resizable(False, False)
 
         # Set window icon
@@ -118,23 +119,18 @@ class UpdateModal(ctk.CTkToplevel):
         self._poll_job = self.after(100, self._poll_events)
 
     def center_window(self):
-        self.update_idletasks()
-        try:
-            pw = self.parent.winfo_width()
-            ph = self.parent.winfo_height()
-            px = self.parent.winfo_rootx()
-            py = self.parent.winfo_rooty()
-            w, h = 520, 420
-            x = px + (pw - w) // 2
-            y = py + (ph - h) // 2
-            self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
-        except Exception:
-            pass
+        center_on_parent(self, self.parent, 520, 500)
 
     def build_ui(self):
         # Outer Card Container
-        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
-        card.pack(fill="both", expand=True, padx=15, pady=15)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_high"],
+            corner_radius=RADIUS["xl"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Top Header
         header = ctk.CTkFrame(card, fg_color="transparent")
@@ -157,36 +153,42 @@ class UpdateModal(ctk.CTkToplevel):
         title = ctk.CTkLabel(
             title_box,
             text="يتوفر إصدار جديد من ورقات!",
-            font=("Segoe UI", 16, "bold"),
-            text_color=("gray10", "#F8FAFC")
+            font=ui_font(17, "bold"),
+            text_color=M3["on_surface"]
         )
         title.pack(anchor="w")
 
         sub = ctk.CTkLabel(
             title_box,
             text=f"الإصدار الحالي: v{APP_VERSION}  ←  الإصدار الجديد: {self.version_tag}",
-            font=("Segoe UI", 11),
-            text_color=("#0284C7", "#38BDF8")
+            font=ui_font(11),
+            text_color=M3["primary"]
         )
         sub.pack(anchor="w")
 
         # Release Notes Box
-        notes_frame = ctk.CTkFrame(card, fg_color=("gray95", "#12151C"), corner_radius=8, border_color=("gray75", "#252A36"), border_width=1)
+        notes_frame = ctk.CTkFrame(
+            card,
+            fg_color=M3["surface_container_lowest"],
+            corner_radius=RADIUS["md"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
         notes_frame.pack(fill="both", expand=True, padx=16, pady=(5, 12))
 
         lbl_notes_title = ctk.CTkLabel(
             notes_frame,
             text="سجل التغييرات والميزات الجديدة | What's New:",
-            font=("Segoe UI", 11, "bold"),
-            text_color=("gray40", "#94A3B8")
+            font=ui_font(11, "bold"),
+            text_color=M3["on_surface_variant"]
         )
         lbl_notes_title.pack(anchor="w", padx=12, pady=(8, 4))
 
         self.notes_box = ctk.CTkTextbox(
             notes_frame,
-            font=("Segoe UI", 11),
+            font=ui_font(11),
             fg_color="transparent",
-            text_color=("gray10", "#E2E8F0"),
+            text_color=M3["on_surface_variant"],
             wrap="word",
             border_width=0
         )
@@ -204,24 +206,29 @@ class UpdateModal(ctk.CTkToplevel):
         self.status_lbl = ctk.CTkLabel(
             status_row,
             text="جاهز للتنزيل والتثبيت مباشرة",
-            font=("Segoe UI", 11),
-            text_color=("gray40", "#94A3B8")
+            font=ui_font(11),
+            text_color=M3["on_surface_variant"]
         )
         self.status_lbl.pack(side="left")
 
         self.pct_lbl = ctk.CTkLabel(
             status_row,
             text="",
-            font=("Segoe UI", 11, "bold"),
-            text_color=("#0284C7", "#38BDF8")
+            font=ui_font(11, "bold"),
+            text_color=M3["primary"]
         )
         self.pct_lbl.pack(side="right")
 
-        self.progress_bar = ctk.CTkProgressBar(
+        self.progress_bar = WavyProgressBar(
             self.progress_frame,
-            height=8,
-            progress_color="#059669",
-            fg_color=("gray80", "#1E2433")
+            height=14,
+            progress_color=M3["primary"],
+            track_color=M3["outline_variant"],
+            surface_color=M3["surface_container_high"],
+            amplitude=2.4,
+            wavelength=34,
+            thickness=4.0,
+            speed=40.0,
         )
         self.progress_bar.pack(fill="x")
         self.progress_bar.set(0)
@@ -233,10 +240,13 @@ class UpdateModal(ctk.CTkToplevel):
         self.btn_install = ctk.CTkButton(
             self.btn_frame,
             text="✓ تحديث وتثبيت الآن | Update & Install",
-            height=38,
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#4F46E5",
-            hover_color="#4338CA",
+            height=42,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(12, "bold"),
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            text_color=M3["on_primary"],
+            border_width=0,
             command=self.start_update
         )
         self.btn_install.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -244,23 +254,28 @@ class UpdateModal(ctk.CTkToplevel):
         self.btn_cancel = ctk.CTkButton(
             self.btn_frame,
             text="لاحقاً | Later",
-            width=100,
-            height=38,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            width=105,
+            height=42,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(11),
+            fg_color="transparent",
+            hover_color=M3["primary_container"],
+            text_color=M3["primary"],
+            border_width=1,
+            border_color=M3["outline"],
             command=self.destroy
         )
         self.btn_skip = ctk.CTkButton(
             self.btn_frame,
             text="تخطي | Skip",
-            width=90,
-            height=38,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#475569"),
-            hover_color=("gray65", "#64748B"),
-            text_color=("gray10", "white"),
+            width=95,
+            height=42,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(11),
+            fg_color="transparent",
+            hover_color=M3["surface_container_highest"],
+            text_color=M3["on_surface_variant"],
+            border_width=0,
             command=self._skip
         )
         self.btn_skip.pack(side="left", padx=(0, 6))
@@ -269,13 +284,14 @@ class UpdateModal(ctk.CTkToplevel):
 
     def start_update(self):
         if not self.download_url:
-            self.status_lbl.configure(text="تعذر العثور على ملف التحديث في خوادم GitHub", text_color=("#DC2626", "#EF4444"))
+            self.status_lbl.configure(text="تعذر العثور على ملف التحديث في خوادم GitHub", text_color=M3["error"])
             return
 
         self.btn_install.configure(state="disabled", text="جاري التنزيل...")
         self.btn_cancel.configure(state="disabled")
-        self.status_lbl.configure(text="جاري تنزيل النسخة الجديدة من GitHub...", text_color=("#0284C7", "#38BDF8"))
+        self.status_lbl.configure(text="جاري تنزيل النسخة الجديدة من GitHub...", text_color=M3["primary"])
         self.progress_bar.set(0)
+        self.progress_bar.start()
 
         def _prog(pct):
             self._events.put(("progress", pct))
@@ -319,13 +335,16 @@ class UpdateModal(ctk.CTkToplevel):
 
     def _on_prog(self, pct):
         self.progress_bar.set(pct / 100.0)
+        self.progress_bar.start()
         self.pct_lbl.configure(text=f"{pct}%")
 
     def _on_done(self, success, msg):
         if success:
+            self.progress_bar.set(1.0)
+            self.progress_bar.stop()
             self.status_lbl.configure(
                 text="✓ تم التنزيل! سيتم إغلاق التطبيق وتثبيت النسخة الجديدة تلقائياً...",
-                text_color=("#059669", "#10B981")
+                text_color=M3["success"]
             )
             self.pct_lbl.configure(text="100%")
             self.btn_install.configure(state="disabled")
@@ -334,7 +353,8 @@ class UpdateModal(ctk.CTkToplevel):
             # replace the locked exe and relaunch the new version.
             self.after(1200, self._exit_for_update)
         else:
-            self.status_lbl.configure(text=f"فشل التحديث: {msg}", text_color=("#DC2626", "#EF4444"))
+            self.progress_bar.stop()
+            self.status_lbl.configure(text=f"فشل التحديث: {msg}", text_color=M3["error"])
             self.btn_install.configure(state="normal", text="إعادة المحاولة | Retry")
             self.btn_cancel.configure(state="normal")
 

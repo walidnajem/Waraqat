@@ -30,7 +30,7 @@ from update_modal import UpdateModal, UpdateResultModal
 from tkinter import filedialog
 
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from config import (
     APP_NAME,
@@ -44,6 +44,7 @@ from extractor import extract_files, extract_files_batch
 from downloader import download_parallel
 from utils import clean_filename, fit_filename, get_site_name
 from notifications import notify_download_complete, notify_error
+from md3 import COLORS as M3, RADIUS, font as ui_font, center_on_parent, WavyProgressBar
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -79,6 +80,120 @@ def load_icon_image(name, size=(18, 18)):
     return None
 
 
+_CHECK_ICON_CACHE = None
+
+
+def check_icon(size=(14, 14)):
+    """Theme-aware checkmark used by selected Material 3 filter chips."""
+    global _CHECK_ICON_CACHE
+    if _CHECK_ICON_CACHE is None:
+        scale = 4
+        w = h = size[0] * scale
+
+        def draw(color):
+            img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            drawer = ImageDraw.Draw(img)
+            drawer.line(
+                [(w * 0.22, h * 0.52), (w * 0.43, h * 0.72), (w * 0.80, h * 0.30)],
+                fill=color,
+                width=scale * 2,
+                joint="curve",
+            )
+            return img.resize(size, Image.Resampling.LANCZOS)
+
+        _CHECK_ICON_CACHE = ctk.CTkImage(
+            light_image=draw("#1B1B3A"),
+            dark_image=draw("#E4E1F9"),
+            size=size,
+        )
+    return _CHECK_ICON_CACHE
+
+
+# ---------------------------------------------------------------------------
+# Material 3 widget helpers
+# ---------------------------------------------------------------------------
+_BUTTON_VARIANTS = {
+    "filled": {
+        "fg_color": M3["primary"],
+        "hover_color": M3["primary_hover"],
+        "text_color": M3["on_primary"],
+    },
+    "tonal": {
+        "fg_color": M3["secondary_container"],
+        "hover_color": M3["secondary_hover"],
+        "text_color": M3["on_secondary_container"],
+    },
+    "outlined": {
+        "fg_color": "transparent",
+        "hover_color": M3["primary_container"],
+        "text_color": M3["primary"],
+        "border_width": 1,
+        "border_color": M3["outline"],
+    },
+    "text": {
+        "fg_color": "transparent",
+        "hover_color": M3["primary_container"],
+        "text_color": M3["primary"],
+    },
+    "success": {
+        "fg_color": M3["success"],
+        "hover_color": M3["success_hover"],
+        "text_color": M3["on_success"],
+    },
+    "danger": {
+        "fg_color": M3["error_container"],
+        "hover_color": M3["error_hover"],
+        "text_color": M3["on_error_container"],
+    },
+    "icon": {
+        "fg_color": "transparent",
+        "hover_color": M3["surface_container_high"],
+        "text_color": M3["on_surface_variant"],
+        "width": 40,
+        "height": 40,
+    },
+}
+
+
+def m3_button(parent, text="", variant="filled", **kwargs):
+    """Creates a Material 3 styled button."""
+    style = {
+        "height": 40,
+        "corner_radius": RADIUS["pill"],
+        "font": ui_font(12, "bold"),
+        "border_width": 0,
+    }
+    style.update(_BUTTON_VARIANTS.get(variant, _BUTTON_VARIANTS["filled"]))
+    style.update(kwargs)
+    return ctk.CTkButton(parent, text=text, **style)
+
+
+def m3_input(widget):
+    """Applies the Material 3 outlined text-field look, including focus ring."""
+    widget.configure(
+        fg_color=M3["surface_container_lowest"],
+        border_color=M3["outline_variant"],
+        border_width=1,
+        corner_radius=RADIUS["md"],
+    )
+
+    def _focus_in(_event):
+        try:
+            widget.configure(border_color=M3["primary"], border_width=2)
+        except Exception:
+            pass
+
+    def _focus_out(_event):
+        try:
+            widget.configure(border_color=M3["outline_variant"], border_width=1)
+        except Exception:
+            pass
+
+    widget.bind("<FocusIn>", _focus_in, add="+")
+    widget.bind("<FocusOut>", _focus_out, add="+")
+    return widget
+
+
 class NewFolderModal(ctk.CTkToplevel):
     """
     A custom next-level modal window matching Waraqat design for creating
@@ -87,6 +202,7 @@ class NewFolderModal(ctk.CTkToplevel):
 
     def __init__(self, parent, current_path, on_folder_created):
         super().__init__(parent)
+        self.configure(fg_color=M3["surface"])
 
         self.parent = parent
         self.on_folder_created = on_folder_created
@@ -119,24 +235,18 @@ class NewFolderModal(ctk.CTkToplevel):
         self.entry.focus_set()
 
     def center_window(self):
-        self.update_idletasks()
-        try:
-            pw = self.parent.winfo_width()
-            ph = self.parent.winfo_height()
-            px = self.parent.winfo_rootx()
-            py = self.parent.winfo_rooty()
-            w = 520
-            h = 350
-            x = px + (pw - w) // 2
-            y = py + (ph - h) // 2
-            self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
-        except Exception:
-            pass
+        center_on_parent(self, self.parent, 520, 350)
 
     def build_modal_ui(self):
         # Card container
-        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
-        card.pack(fill="both", expand=True, padx=15, pady=15)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_high"],
+            corner_radius=RADIUS["xl"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Header with folder icon
         header_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -153,21 +263,25 @@ class NewFolderModal(ctk.CTkToplevel):
         title = ctk.CTkLabel(
             title_box,
             text="إنشاء مجلد جديد للتحميل | Create New Folder",
-            font=("Segoe UI", 15, "bold"),
-            text_color=("gray10", "#F8FAFC")
+            font=ui_font(16, "bold"),
+            text_color=M3["on_surface"]
         )
         title.pack(anchor="w")
 
         subtitle = ctk.CTkLabel(
             title_box,
             text="سيتم حفظ الملفات المحملة داخل هذا المجلد تلقائياً",
-            font=("Segoe UI", 11),
-            text_color=("gray40", "#94A3B8")
+            font=ui_font(11),
+            text_color=M3["on_surface_variant"]
         )
         subtitle.pack(anchor="w")
 
         # Base directory option
-        options_frame = ctk.CTkFrame(card, fg_color=("gray95", "#12151C"), corner_radius=8)
+        options_frame = ctk.CTkFrame(
+            card,
+            fg_color=M3["surface_container_lowest"],
+            corner_radius=RADIUS["md"]
+        )
         options_frame.pack(fill="x", padx=15, pady=(5, 10))
 
         radio_downloads = ctk.CTkRadioButton(
@@ -175,7 +289,10 @@ class NewFolderModal(ctk.CTkToplevel):
             text="داخل مجلد التنزيلات الرئيسي (Downloads)",
             variable=self.base_choice_var,
             value="downloads",
-            font=("Segoe UI", 11),
+            font=ui_font(11),
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            text_color=M3["on_surface"],
             command=self.update_preview
         )
         radio_downloads.pack(anchor="w", padx=12, pady=(8, 4))
@@ -185,7 +302,10 @@ class NewFolderModal(ctk.CTkToplevel):
             text=f"داخل المجلد الحالي: {os.path.basename(self.current_path)}",
             variable=self.base_choice_var,
             value="current",
-            font=("Segoe UI", 11),
+            font=ui_font(11),
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            text_color=M3["on_surface"],
             command=self.update_preview
         )
         radio_current.pack(anchor="w", padx=12, pady=(0, 8))
@@ -194,19 +314,18 @@ class NewFolderModal(ctk.CTkToplevel):
         entry_label = ctk.CTkLabel(
             card,
             text="اسم المجلد الجديد | Folder Name:",
-            font=("Segoe UI", 11, "bold"),
-            text_color=("gray10", "#E2E8F0")
+            font=ui_font(11, "bold"),
+            text_color=M3["on_surface"]
         )
         entry_label.pack(anchor="w", padx=15, pady=(2, 2))
 
-        self.entry = ctk.CTkEntry(
+        self.entry = m3_input(ctk.CTkEntry(
             card,
             placeholder_text="مثال: روايات, امتحانات 2024, دروس الفيزياء...",
-            height=38,
-            font=("Segoe UI", 12),
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#475569")
-        )
+            height=42,
+            font=ui_font(12),
+            placeholder_text_color=M3["on_surface_variant"]
+        ))
         self.entry.pack(fill="x", padx=15, pady=(0, 8))
         self.entry.bind("<KeyRelease>", self.update_preview)
         self.entry.bind("<Return>", lambda e: self.confirm_create())
@@ -217,7 +336,7 @@ class NewFolderModal(ctk.CTkToplevel):
             card,
             text="مسار الحفظ النهائي: ...",
             font=("Consolas", 10),
-            text_color=("#0284C7", "#38BDF8"),
+            text_color=M3["primary"],
             wraplength=460,
             justify="left"
         )
@@ -227,26 +346,23 @@ class NewFolderModal(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
         btn_frame.pack(fill="x", padx=15, pady=(0, 12))
 
-        confirm_btn = ctk.CTkButton(
+        confirm_btn = m3_button(
             btn_frame,
             text="✓ إنشاء وتحديد المجلد | Create & Select",
-            height=36,
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#059669",
-            hover_color="#047857",
+            variant="success",
+            height=42,
+            font=ui_font(12, "bold"),
             command=self.confirm_create
         )
         confirm_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        cancel_btn = ctk.CTkButton(
+        cancel_btn = m3_button(
             btn_frame,
             text="إلغاء | Cancel",
-            width=100,
-            height=36,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            variant="outlined",
+            width=110,
+            height=42,
+            font=ui_font(11),
             command=self.destroy
         )
         cancel_btn.pack(side="left")
@@ -300,13 +416,17 @@ class SettingsModal(ctk.CTkToplevel):
     """
     def __init__(self, parent, settings, on_save):
         super().__init__(parent)
+        self.configure(fg_color=M3["surface"])
         self.parent = parent
         self._settings = dict(settings)
         self._on_save = on_save
 
         self.title("الإعدادات | Settings")
-        self.geometry("540x610")
-        self.minsize(500, 560)
+        # Tall enough for all sections when the screen allows it; scrolls otherwise.
+        self._win_w = 540
+        self._win_h = min(740, self.winfo_screenheight() - 160)
+        self.geometry(f"{self._win_w}x{self._win_h}")
+        self.minsize(520, min(640, self._win_h))
         self.resizable(False, False)
 
         # Set window icon
@@ -328,23 +448,18 @@ class SettingsModal(ctk.CTkToplevel):
             pass
 
     def center_window(self):
-        self.update_idletasks()
-        try:
-            pw = self.parent.winfo_width()
-            ph = self.parent.winfo_height()
-            px = self.parent.winfo_rootx()
-            py = self.parent.winfo_rooty()
-            w, h = 540, 610
-            x = px + (pw - w) // 2
-            y = py + (ph - h) // 2
-            self.geometry(f"{w}x{h}+{max(x, 50)}+{max(y, 50)}")
-        except Exception:
-            pass
+        center_on_parent(self, self.parent, self._win_w, self._win_h)
 
     def build_ui(self):
         # Card container
-        card = ctk.CTkFrame(self, fg_color=("white", "#181B22"), corner_radius=12, border_color=("gray75", "#334155"), border_width=1)
-        card.pack(fill="both", expand=True, padx=15, pady=15)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_high"],
+            corner_radius=RADIUS["xl"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Header with icon
         header = ctk.CTkFrame(card, fg_color="transparent")
@@ -361,19 +476,29 @@ class SettingsModal(ctk.CTkToplevel):
         title = ctk.CTkLabel(
             title_box,
             text="إعدادات التطبيق | Preferences",
-            font=("Segoe UI", 15, "bold")
+            font=ui_font(16, "bold"),
+            text_color=M3["on_surface"]
         )
         title.pack(anchor="w")
 
         sub = ctk.CTkLabel(
             title_box,
             text="تخصيص سلوك التحميل والمظهر العام لبرنامج ورقات",
-            font=("Segoe UI", 11)
+            font=ui_font(11),
+            text_color=M3["on_surface_variant"]
         )
         sub.pack(anchor="w")
 
-        # Scrollable / Section Container
-        content = ctk.CTkFrame(card, fg_color=("gray90", "#12151C"), corner_radius=10, border_color=("gray75", "#252A36"), border_width=1)
+        # Scrollable section container; actions stay pinned at the bottom.
+        content = ctk.CTkScrollableFrame(
+            card,
+            fg_color=M3["surface_container_low"],
+            corner_radius=RADIUS["lg"],
+            border_color=M3["outline_variant"],
+            border_width=1,
+            scrollbar_button_color=M3["outline_variant"],
+            scrollbar_button_hover_color=M3["outline"]
+        )
         content.pack(fill="both", expand=True, padx=16, pady=(0, 12))
 
         # --- Section 1: Save Path ---
@@ -382,32 +507,28 @@ class SettingsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sec1,
-            text="📁 مسار التنزيل الافتراضي | Default Download Location:",
+            text="مسار التنزيل الافتراضي | Default Download Location:",
             font=("Segoe UI", 11, "bold")
         ).pack(anchor="w", pady=(0, 4))
 
         path_row = ctk.CTkFrame(sec1, fg_color="transparent")
         path_row.pack(fill="x")
 
-        self.path_entry = ctk.CTkEntry(
+        self.path_entry = m3_input(ctk.CTkEntry(
             path_row,
-            height=34,
-            font=("Segoe UI", 11),
-            fg_color=("gray95", "#1A1F2C"),
-            border_color=("gray70", "#334155")
-        )
+            height=40,
+            font=ui_font(11)
+        ))
         self.path_entry.insert(0, self._settings.get("save_path", ""))
         self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        browse_btn = ctk.CTkButton(
+        browse_btn = m3_button(
             path_row,
             text="استعراض...",
-            width=85,
-            height=34,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            variant="outlined",
+            width=95,
+            height=40,
+            font=ui_font(11),
             command=self._browse_folder
         )
         browse_btn.pack(side="left")
@@ -418,7 +539,7 @@ class SettingsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sec2,
-            text="⚡ سرعة التنزيل والاتصالات المتزامنة | Concurrent Threads:",
+            text="سرعة التنزيل والاتصالات المتزامنة | Concurrent Threads:",
             font=("Segoe UI", 11, "bold")
         ).pack(anchor="w", pady=(0, 4))
 
@@ -428,8 +549,18 @@ class SettingsModal(ctk.CTkToplevel):
         self.threads_menu = ctk.CTkOptionMenu(
             threads_row,
             values=["2 ملفات (اتصال هادئ)", "3 ملفات", "5 ملفات (موصى به)", "8 ملفات (اتصال سريع)", "10 ملفات (فائق السرعة)"],
-            width=220,
-            height=32
+            width=230,
+            height=36,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(11),
+            dropdown_font=ui_font(11),
+            fg_color=M3["surface_container_highest"],
+            button_color=M3["surface_container_high"],
+            button_hover_color=M3["outline_variant"],
+            text_color=M3["on_surface"],
+            dropdown_fg_color=M3["surface_container_high"],
+            dropdown_hover_color=M3["primary_container"],
+            dropdown_text_color=M3["on_surface"]
         )
         curr_workers = self._settings.get("max_workers", 5)
         # Select matching menu value
@@ -453,8 +584,18 @@ class SettingsModal(ctk.CTkToplevel):
         self.timeout_menu = ctk.CTkOptionMenu(
             timeout_row,
             values=["15 ثانية", "30 ثانية", "60 ثانية (موصى به)", "120 ثانية"],
-            width=180,
-            height=30
+            width=190,
+            height=34,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(11),
+            dropdown_font=ui_font(11),
+            fg_color=M3["surface_container_highest"],
+            button_color=M3["surface_container_high"],
+            button_hover_color=M3["outline_variant"],
+            text_color=M3["on_surface"],
+            dropdown_fg_color=M3["surface_container_high"],
+            dropdown_hover_color=M3["primary_container"],
+            dropdown_text_color=M3["on_surface"]
         )
         try:
             curr_timeout = int(self._settings.get("timeout", 60))
@@ -476,16 +617,17 @@ class SettingsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sec2b,
-            text="🌐 Proxy (اختياري | optional):",
+            text="Proxy (اختياري | optional):",
             font=("Segoe UI", 11, "bold")
         ).pack(anchor="w", pady=(0, 4))
 
-        self.proxy_entry = ctk.CTkEntry(
+        self.proxy_entry = m3_input(ctk.CTkEntry(
             sec2b,
             placeholder_text="http://user:pass@host:port  (اتركه فارغاً لتعطيله)",
-            height=32,
-            font=("Segoe UI", 11)
-        )
+            height=40,
+            font=ui_font(11),
+            placeholder_text_color=M3["on_surface_variant"]
+        ))
         self.proxy_entry.pack(fill="x")
         self.proxy_entry.insert(0, self._settings.get("proxy", "") or "")
 
@@ -496,15 +638,25 @@ class SettingsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sec3,
-            text="🎨 مظهر التطبيق | Theme:",
+            text="مظهر التطبيق | Theme:",
             font=("Segoe UI", 11, "bold")
         ).pack(anchor="w", pady=(0, 4))
 
         self.theme_menu = ctk.CTkOptionMenu(
             sec3,
             values=["Dark (الوضع الداكن)", "Light (الوضع الفاتح)", "System (مطابق للنظام)"],
-            width=220,
-            height=32
+            width=230,
+            height=36,
+            corner_radius=RADIUS["pill"],
+            font=ui_font(11),
+            dropdown_font=ui_font(11),
+            fg_color=M3["surface_container_highest"],
+            button_color=M3["surface_container_high"],
+            button_hover_color=M3["outline_variant"],
+            text_color=M3["on_surface"],
+            dropdown_fg_color=M3["surface_container_high"],
+            dropdown_hover_color=M3["primary_container"],
+            dropdown_text_color=M3["on_surface"]
         )
         curr_theme = self._settings.get("theme", "Dark")
         for tv in self.theme_menu._values:
@@ -519,7 +671,7 @@ class SettingsModal(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             sec4,
-            text="⚙️ سلوك التطبيق التلقائي | Automation Options:",
+            text="سلوك التطبيق التلقائي | Automation Options:",
             font=("Segoe UI", 11, "bold")
         ).pack(anchor="w", pady=(0, 6))
 
@@ -528,9 +680,12 @@ class SettingsModal(ctk.CTkToplevel):
             sec4,
             text="فتح مجلد الحفظ في File Explorer تلقائياً عند انتهاء التحميل",
             variable=self.var_open_folder,
-            font=("Segoe UI", 11),
-            fg_color="#4F46E5",
-            hover_color="#4338CA"
+            font=ui_font(11),
+            text_color=M3["on_surface"],
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            border_color=M3["outline"],
+            checkmark_color=M3["on_primary"]
         )
         cb_open.pack(anchor="w", pady=(0, 4))
 
@@ -539,9 +694,12 @@ class SettingsModal(ctk.CTkToplevel):
             sec4,
             text="البحث عن تحديثات ورقات تلقائياً عند تشغيل البرنامج",
             variable=self.var_auto_update,
-            font=("Segoe UI", 11),
-            fg_color="#4F46E5",
-            hover_color="#4338CA"
+            font=ui_font(11),
+            text_color=M3["on_surface"],
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            border_color=M3["outline"],
+            checkmark_color=M3["on_primary"]
         )
         cb_update.pack(anchor="w", pady=(0, 4))
 
@@ -550,9 +708,12 @@ class SettingsModal(ctk.CTkToplevel):
             sec4,
             text="تفعيل إشعارات الويندوز (Toast Notifications) عند اكتمال التنزيل",
             variable=self.var_notifications,
-            font=("Segoe UI", 11),
-            fg_color="#4F46E5",
-            hover_color="#4338CA"
+            font=ui_font(11),
+            text_color=M3["on_surface"],
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            border_color=M3["outline"],
+            checkmark_color=M3["on_primary"]
         )
         cb_notify.pack(anchor="w")
 
@@ -560,26 +721,23 @@ class SettingsModal(ctk.CTkToplevel):
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
         btn_row.pack(fill="x", padx=16, pady=(10, 16))
 
-        save_btn = ctk.CTkButton(
+        save_btn = m3_button(
             btn_row,
             text="✓ حفظ الإعدادات | Save Settings",
-            height=38,
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#059669",
-            hover_color="#047857",
+            variant="success",
+            height=42,
+            font=ui_font(12, "bold"),
             command=self._save
         )
         save_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        cancel_btn = ctk.CTkButton(
+        cancel_btn = m3_button(
             btn_row,
             text="إلغاء | Cancel",
-            width=100,
-            height=38,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#475569"),
-            hover_color=("gray65", "#64748B"),
-            text_color=("gray10", "white"),
+            variant="outlined",
+            width=110,
+            height=42,
+            font=ui_font(11),
             command=self.destroy
         )
         cancel_btn.pack(side="left")
@@ -634,16 +792,25 @@ class DownloadItem(ctk.CTkFrame):
     - Dynamic status indicator (Waiting, % Progress, Done, Skipped, Error)
     """
     def __init__(self, master, index, item, var, open_resolver=None):
-        super().__init__(master, fg_color=("white", "#181B22"), corner_radius=8, border_color=("gray75", "#252A36"), border_width=1)
+        super().__init__(
+            master,
+            fg_color=M3["surface_container_lowest"],
+            corner_radius=RADIUS["md"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
         self.pack(fill="x", padx=4, pady=3)
         self.index = index
         self.item = item
         self.var = var
         self._open_resolver = open_resolver
 
-        # Main top row container
-        top_row = ctk.CTkFrame(self, fg_color="transparent")
-        top_row.pack(fill="x", padx=10, pady=(6, 4))
+        # Main row: text/controls on the left, optional thumbnail on the right.
+        self.body = ctk.CTkFrame(self, fg_color="transparent")
+        self.body.pack(fill="x")
+
+        top_row = ctk.CTkFrame(self.body, fg_color="transparent")
+        top_row.pack(side="left", fill="x", expand=True, padx=10, pady=(6, 4))
 
         # Checkbox
         self.cb = ctk.CTkCheckBox(
@@ -653,8 +820,11 @@ class DownloadItem(ctk.CTkFrame):
             width=22,
             checkbox_width=18,
             checkbox_height=18,
-            fg_color="#4F46E5",
-            hover_color="#4338CA"
+            corner_radius=4,
+            fg_color=M3["primary"],
+            hover_color=M3["primary_hover"],
+            border_color=M3["outline"],
+            checkmark_color=M3["on_primary"]
         )
         self.cb.pack(side="left", padx=(0, 6))
 
@@ -664,12 +834,12 @@ class DownloadItem(ctk.CTkFrame):
         self.badge = ctk.CTkLabel(
             top_row,
             text=raw_type,
-            font=("Segoe UI", 10, "bold"),
+            font=ui_font(10, "bold"),
             fg_color=badge_color,
             text_color="#FFFFFF",
-            corner_radius=6,
-            padx=8,
-            pady=2
+            corner_radius=RADIUS["sm"],
+            padx=9,
+            pady=3
         )
         self.badge.pack(side="left", padx=(0, 10))
 
@@ -678,8 +848,8 @@ class DownloadItem(ctk.CTkFrame):
         self.title_lbl = ctk.CTkLabel(
             top_row,
             text=title_text,
-            font=("Segoe UI", 11),
-            text_color=("gray10", "#F1F5F9"),
+            font=ui_font(12),
+            text_color=M3["on_surface"],
             anchor="w"
         )
         self.title_lbl.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -688,39 +858,49 @@ class DownloadItem(ctk.CTkFrame):
         self.status_lbl = ctk.CTkLabel(
             top_row,
             text="Ready | جاهز",
-            font=("Segoe UI", 10),
-            text_color=("gray40", "#64748B"),
-            width=85,
+            font=ui_font(10),
+            text_color=M3["on_surface_variant"],
+            width=105,
             anchor="e"
         )
         self.status_lbl.pack(side="right")
 
-        self.open_btn = ctk.CTkButton(
+        self.open_btn = m3_button(
             top_row,
-            text="👁",
-            width=28,
-            height=22,
-            font=("Segoe UI", 11),
-            fg_color=("gray80", "#1E293B"),
-            hover_color=("gray70", "#334155"),
-            text_color=("gray10", "white"),
+            text="Open",
+            variant="icon",
+            width=56,
+            height=30,
+            corner_radius=15,
+            font=ui_font(10, "bold"),
             command=self._open_file
         )
         self.open_btn.pack(side="right", padx=(4, 0))
 
-        self.thumb_label = ctk.CTkLabel(self, text="", width=48, height=64)
-        self.thumb_label.pack(side="right", padx=(8, 10), pady=(0, 6))
+        self.thumb_label = ctk.CTkLabel(
+            self.body,
+            text="",
+            width=48,
+            height=64,
+            corner_radius=RADIUS["sm"],
+            fg_color=M3["surface_container"]
+        )
+        # Packed only after a preview image is ready, so rows stay compact.
         self.thumb_label.bind("<Button-1>", lambda e: self._open_file())
         self._thumb_filepath = None
         self._thumb_image = None
 
         # Per-file sleek progress bar (visible when downloading or completed)
-        self.progress_bar = ctk.CTkProgressBar(
+        self.progress_bar = WavyProgressBar(
             self,
-            height=4,
-            progress_color="#6366F1",
-            fg_color=("gray80", "#1E2433"),
-            corner_radius=2
+            height=10,
+            progress_color=M3["primary"],
+            track_color=M3["outline_variant"],
+            surface_color=M3["surface_container_lowest"],
+            amplitude=1.8,
+            wavelength=32,
+            thickness=2.6,
+            speed=34.0,
         )
         self.progress_bar.pack(fill="x", padx=10, pady=(0, 6))
         self.progress_bar.set(0)
@@ -742,7 +922,7 @@ class DownloadItem(ctk.CTkFrame):
             except Exception:
                 pass
         try:
-            self.status_lbl.configure(text="Download first | نزّل أولاً", text_color="#D97706")
+            self.status_lbl.configure(text="Download first | نزّل أولاً", text_color=M3["warning"])
         except Exception:
             pass
 
@@ -762,6 +942,8 @@ class DownloadItem(ctk.CTkFrame):
                 self._thumb_filepath = filepath
                 try:
                     self.thumb_label.configure(image=ctk_img, text="")
+                    if not self.thumb_label.winfo_manager():
+                        self.thumb_label.pack(side="right", padx=(6, 10), pady=(8, 6))
                 except Exception:
                     pass
 
@@ -771,57 +953,78 @@ class DownloadItem(ctk.CTkFrame):
 
     def update_state(self, status, percent=0.0, downloaded=0, total=0, filepath=None):
         if status == "downloading":
-            self.configure(border_color="#4F46E5", fg_color=("#EEF2FF", "#1A1F2C"))
-            self.status_lbl.configure(text=f"{int(percent)}%", text_color=("#2563EB", "#38BDF8"))
-            self.progress_bar.configure(progress_color="#38BDF8")
+            self.configure(border_color=M3["primary"], fg_color=M3["primary_container"])
+            self.status_lbl.configure(text=f"{int(percent)}%", text_color=M3["primary"])
+            self.progress_bar.set_colors(progress_color=M3["primary"])
             self.progress_bar.set(percent / 100.0)
+            self.progress_bar.start()
         elif status == "progress":
             if total and total > 0:
                 txt = f"{int(percent)}% ({downloaded/1048576:.1f}/{total/1048576:.1f} MB)"
             else:
                 txt = f"{int(percent)}%"
-            self.status_lbl.configure(text=txt, text_color=("#2563EB", "#38BDF8"))
+            self.status_lbl.configure(text=txt, text_color=M3["primary"])
             self.progress_bar.set(percent / 100.0)
+            self.progress_bar.start()
         elif status == "success":
             if filepath:
                 self._thumb_filepath = filepath
                 if _HAS_PDF_PREVIEW and str(filepath).lower().endswith(".pdf"):
                     import threading
                     threading.Thread(target=self._render_thumbnail, args=(filepath,), daemon=True).start()
-            self.configure(border_color="#059669", fg_color=("#ECFDF5", "#14231E"))
-            self.status_lbl.configure(text="Completed ✓", text_color="#059669")
-            self.progress_bar.configure(progress_color="#10B981")
+            self.configure(border_color=M3["success"], fg_color=M3["success_container"])
+            self.status_lbl.configure(text="Completed ✓", text_color=M3["success"])
+            self.progress_bar.set_colors(progress_color=M3["success"])
             self.progress_bar.set(1.0)
+            self.progress_bar.stop()
         elif status == "skip":
             if filepath:
                 self._thumb_filepath = filepath
                 if _HAS_PDF_PREVIEW and str(filepath).lower().endswith(".pdf"):
                     import threading
                     threading.Thread(target=self._render_thumbnail, args=(filepath,), daemon=True).start()
-            self.configure(border_color=("gray75", "#334155"), fg_color=("gray95", "#161922"))
-            self.status_lbl.configure(text="Exists (Skip)", text_color=("gray50", "#94A3B8"))
+            self.configure(border_color=M3["outline_variant"], fg_color=M3["surface_container"])
+            self.status_lbl.configure(text="Exists (Skip)", text_color=M3["on_surface_variant"])
             self.progress_bar.set(1.0)
-            self.progress_bar.configure(progress_color="#475569")
+            self.progress_bar.set_colors(progress_color=M3["outline"])
+            self.progress_bar.stop()
         elif status == "failed":
-            self.configure(border_color="#DC2626", fg_color=("#FEF2F2", "#241416"))
-            self.status_lbl.configure(text="Failed ✗", text_color="#DC2626")
-            self.progress_bar.configure(progress_color="#EF4444")
+            self.configure(border_color=M3["error"], fg_color=M3["error_container"])
+            self.status_lbl.configure(text="Failed ✗", text_color=M3["error"])
+            self.progress_bar.set_colors(progress_color=M3["error"])
+            self.progress_bar.stop()
         elif status == "cancelled":
-            self.status_lbl.configure(text="Cancelled", text_color="#D97706")
-            self.progress_bar.configure(progress_color="#F59E0B")
+            self.status_lbl.configure(text="Cancelled", text_color=M3["warning"])
+            self.progress_bar.set_colors(progress_color=M3["warning"])
+            self.progress_bar.stop()
         elif status == "retry":
-            self.status_lbl.configure(text="Retrying...", text_color="#D97706")
+            self.status_lbl.configure(text="Retrying...", text_color=M3["warning"])
+            self.progress_bar.stop()
 
+        # Keep the wavy bar background in sync with the current row colour.
+        try:
+            self.progress_bar.set_surface(self.cget("fg_color"))
+        except Exception:
+            pass
 
 
 class App(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        self.configure(fg_color=M3["surface"])
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("1020x880")
-        self.minsize(880, 720)
+
+        # Center on screen and keep the whole window inside the work area.
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        win_w = min(1020, screen_w - 80)
+        win_h = min(880, screen_h - 100)
+        win_x = max(20, (screen_w - win_w) // 2)
+        win_y = max(20, (screen_h - win_h) // 2 - 20)
+        self.geometry(f"{win_w}x{win_h}+{win_x}+{win_y}")
+        self.minsize(min(880, max(760, screen_w - 80)), min(720, max(600, screen_h - 100)))
 
         # Set official Waraqat window icon
         ico_path = os.path.join(ASSETS_DIR, "waraqat_icon.ico")
@@ -930,436 +1133,443 @@ class App(ctk.CTk):
 
     def build_ui(self):
         # ----------------------------------
-        # Top Brand Header
+        # Material 3 top app bar
         # ----------------------------------
-        header_card = ctk.CTkFrame(self, fg_color="transparent")
-        header_card.pack(fill="x", padx=25, pady=(15, 8))
+        app_bar = ctk.CTkFrame(self, fg_color="transparent")
+        app_bar.pack(fill="x", padx=24, pady=(12, 8))
 
-        logo_img = load_icon_image("logo", (42, 42))
+        brand = ctk.CTkFrame(app_bar, fg_color="transparent")
+        brand.pack(side="left")
+
+        logo_img = load_icon_image("logo", (40, 40))
         if logo_img:
-            logo_label = ctk.CTkLabel(header_card, text="", image=logo_img)
-            logo_label.pack(side="left", padx=(0, 14))
+            ctk.CTkLabel(brand, text="", image=logo_img).pack(side="left", padx=(0, 14))
 
-        titles_box = ctk.CTkFrame(header_card, fg_color="transparent")
+        titles_box = ctk.CTkFrame(brand, fg_color="transparent")
         titles_box.pack(side="left")
 
-        app_title = ctk.CTkLabel(
+        ctk.CTkLabel(
             titles_box,
             text=APP_NAME,
-            font=("Segoe UI", 24, "bold")
-        )
-        app_title.pack(anchor="w")
+            font=ui_font(24, "bold"),
+            text_color=M3["on_surface"]
+        ).pack(anchor="w")
 
-        app_sub = ctk.CTkLabel(
+        ctk.CTkLabel(
             titles_box,
             text=APP_SUBTITLE,
-            font=("Segoe UI", 12),
-            text_color=("gray40", "#94A3B8")
-        )
-        app_sub.pack(anchor="w")
+            font=ui_font(12),
+            text_color=M3["on_surface_variant"]
+        ).pack(anchor="w")
 
-        # Version Pill Badge
+        bar_actions = ctk.CTkFrame(app_bar, fg_color="transparent")
+        bar_actions.pack(side="right")
+
         version_pill = ctk.CTkLabel(
-            header_card,
+            bar_actions,
             text=f"v{APP_VERSION}",
-            font=("Segoe UI", 11, "bold"),
-            fg_color=("gray85", "#1E293B"),
-            text_color=("#2563EB", "#38BDF8"),
-            corner_radius=12,
+            font=ui_font(11, "bold"),
+            fg_color=M3["primary_container"],
+            text_color=M3["on_primary_container"],
+            corner_radius=RADIUS["sm"],
             padx=12,
-            pady=4
+            pady=5
         )
-        version_pill.pack(side="right", padx=(8, 0))
+        version_pill.pack(side="left", padx=(0, 10))
 
-        # Settings Button
-        settings_btn = ctk.CTkButton(
-            header_card,
-            text="الإعدادات | Settings",
-            image=self.icon_settings,
-            font=("Segoe UI", 11),
-            width=130,
-            height=32,
-            fg_color=("gray85", "#1E222B"),
-            hover_color=("gray75", "#2A303C"),
-            border_color=("gray70", "#334155"),
-            text_color=("gray10", "#F8FAFC"),
-            border_width=1,
-            command=self.open_settings_dialog
-        )
-        settings_btn.pack(side="right", padx=(6, 0))
-
-        # Check Updates Button
-        self.update_btn = ctk.CTkButton(
-            header_card,
-            text="فحص التحديثات | Updates",
-            image=self.icon_update,
-            font=("Segoe UI", 11),
-            width=150,
-            height=32,
-            fg_color=("gray85", "#1E222B"),
-            hover_color=("gray75", "#2A303C"),
-            border_color=("gray70", "#334155"),
-            text_color=("gray10", "#F8FAFC"),
-            border_width=1,
-            command=self.manual_check_updates
-        )
-        self.update_btn.pack(side="right", padx=(6, 0))
-
-        # Sun / Moon Quick Theme Toggle Button
+        # Sun / Moon quick theme toggle (Material icon button)
         curr_mode = ctk.get_appearance_mode().lower()
         theme_icon = self.icon_sun if curr_mode == "dark" else self.icon_moon
-        self.theme_btn = ctk.CTkButton(
-            header_card,
+        self.theme_btn = m3_button(
+            bar_actions,
             text="",
+            variant="icon",
             image=theme_icon,
-            width=36,
-            height=32,
-            fg_color=("gray85", "#1E222B"),
-            hover_color=("gray75", "#2A303C"),
-            border_color=("gray70", "#334155"),
-            border_width=1,
+            corner_radius=RADIUS["pill"],
             command=self.toggle_theme
         )
-        self.theme_btn.pack(side="right")
+        self.theme_btn.pack(side="left", padx=2)
+
+        self.update_btn = m3_button(
+            bar_actions,
+            text="Updates | التحديثات",
+            variant="outlined",
+            image=self.icon_update,
+            width=155,
+            height=38,
+            font=ui_font(11),
+            command=self.manual_check_updates
+        )
+        self.update_btn.pack(side="left", padx=4)
+
+        self.settings_btn = m3_button(
+            bar_actions,
+            text="Settings | الإعدادات",
+            variant="tonal",
+            image=self.icon_settings,
+            width=150,
+            height=38,
+            font=ui_font(11),
+            command=self.open_settings_dialog
+        )
+        self.settings_btn.pack(side="left", padx=(4, 0))
 
         # ----------------------------------
-        # Card 1: Input URL Tabs
+        # Card 1: URL input tabs
         # ----------------------------------
-        self.tabview = ctk.CTkTabview(
+        input_card = ctk.CTkFrame(
             self,
-            height=125,
-            corner_radius=10,
-            fg_color=("gray90", "#1E222B"),
-            segmented_button_fg_color=("gray80", "#12151C"),
-            segmented_button_selected_color="#4F46E5",
-            segmented_button_selected_hover_color="#4338CA"
+            fg_color=M3["surface_container_low"],
+            corner_radius=RADIUS["lg"],
+            border_color=M3["outline_variant"],
+            border_width=1
         )
-        self.tabview.pack(fill="x", padx=25, pady=(0, 8))
+        input_card.pack(fill="x", padx=24, pady=(0, 8))
+
+        self.tabview = ctk.CTkTabview(
+            input_card,
+            height=112,
+            corner_radius=RADIUS["md"],
+            fg_color=M3["surface_container_low"],
+            segmented_button_fg_color=M3["surface_container"],
+            segmented_button_selected_color=M3["primary_container"],
+            segmented_button_selected_hover_color=M3["secondary_hover"],
+            segmented_button_unselected_color=M3["surface_container"],
+            segmented_button_unselected_hover_color=M3["surface_container_high"],
+            text_color=M3["on_surface"]
+        )
+        self.tabview.pack(fill="x", padx=6, pady=4)
 
         self.tab_single = self.tabview.add("Single URL | صفحة واحدة")
         self.tab_batch = self.tabview.add("Batch URLs | صفحات متعددة")
 
-        # Single Tab Entry
-        self.url_entry = ctk.CTkEntry(
+        self.url_entry = m3_input(ctk.CTkEntry(
             self.tab_single,
             placeholder_text="https://example.com/books-or-lessons-page",
-            height=38,
-            font=("Segoe UI", 12),
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#334155"),
-            border_width=1
-        )
+            height=40,
+            font=ui_font(12),
+            placeholder_text_color=M3["on_surface_variant"]
+        ))
         self.url_entry.pack(fill="x", padx=8, pady=8)
 
-        # Batch Tab Textbox
-        self.batch_textbox = ctk.CTkTextbox(
+        self.batch_textbox = m3_input(ctk.CTkTextbox(
             self.tab_batch,
-            height=65,
+            height=58,
             font=("Consolas", 11),
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#334155"),
-            border_width=1
-        )
+            text_color=M3["on_surface"]
+        ))
         self.batch_textbox.pack(fill="both", expand=True, padx=8, pady=4)
         self.batch_textbox.insert("1.0", "# Paste multiple URLs (one per line) | الصق الروابط هنا (رابط في كل سطر)\n")
 
         # ----------------------------------
-        # Card 2: Save Destination & Folder Tools
+        # Card 2: Save destination
         # ----------------------------------
-        folder_card = ctk.CTkFrame(self, corner_radius=10, fg_color=("gray90", "#1E222B"), border_color=("gray75", "#334155"), border_width=1)
-        folder_card.pack(fill="x", padx=25, pady=(0, 8))
+        folder_card = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_low"],
+            corner_radius=RADIUS["lg"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        folder_card.pack(fill="x", padx=24, pady=(0, 8))
 
         folder_inner = ctk.CTkFrame(folder_card, fg_color="transparent")
-        folder_inner.pack(fill="x", padx=12, pady=10)
+        folder_inner.pack(fill="x", padx=12, pady=8)
 
-        folder_label = ctk.CTkLabel(
+        ctk.CTkLabel(
             folder_inner,
             text="Save Location | مجلد الحفظ:",
-            font=("Segoe UI", 12, "bold")
-        )
-        folder_label.pack(side="left", padx=(0, 10))
+            font=ui_font(12, "bold"),
+            text_color=M3["on_surface"]
+        ).pack(side="left", padx=(0, 10))
 
-        self.folder_entry = ctk.CTkEntry(
+        self.folder_entry = m3_input(ctk.CTkEntry(
             folder_inner,
-            height=34,
-            font=("Segoe UI", 11),
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#334155")
-        )
+            height=36,
+            font=ui_font(11)
+        ))
         self.folder_entry.insert(0, self.selected_save_path)
         self.folder_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        # + New Folder Button
-        self.new_folder_btn = ctk.CTkButton(
+        self.new_folder_btn = m3_button(
             folder_inner,
             text="New Folder | مجلد جديد",
+            variant="tonal",
             image=self.icon_folder_new,
-            width=135,
-            height=34,
-            font=("Segoe UI", 11, "bold"),
-            fg_color="#2563EB",
-            hover_color="#1D4ED8",
+            width=150,
+            height=36,
+            font=ui_font(11),
             command=self.open_new_folder_dialog
         )
         self.new_folder_btn.pack(side="left", padx=(0, 6))
 
-        # Browse Button
-        self.browse_btn = ctk.CTkButton(
+        self.browse_btn = m3_button(
             folder_inner,
             text="Browse | استعراض",
+            variant="outlined",
             image=self.icon_folder_browse,
-            width=115,
-            height=34,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            width=125,
+            height=36,
+            font=ui_font(11),
             command=self.browse_folder
         )
         self.browse_btn.pack(side="left", padx=(0, 6))
 
-        # Open in Explorer Button
-        self.open_folder_btn = ctk.CTkButton(
+        self.open_folder_btn = m3_button(
             folder_inner,
             text="Open | فتح",
+            variant="text",
             image=self.icon_folder_open,
-            width=85,
-            height=34,
-            font=("Segoe UI", 11),
-            fg_color=("gray80", "#1E293B"),
-            hover_color=("gray70", "#334155"),
-            text_color=("gray10", "white"),
+            width=95,
+            height=36,
+            font=ui_font(11),
             command=self.open_destination_folder
         )
         self.open_folder_btn.pack(side="left")
 
         # ----------------------------------
-        # Card 3: Status & Concurrency Bar
+        # Card 3: Status & concurrency
         # ----------------------------------
-        status_bar = ctk.CTkFrame(self, corner_radius=8, fg_color=("gray85", "#161922"))
-        status_bar.pack(fill="x", padx=25, pady=(0, 8))
+        status_bar = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container"],
+            corner_radius=RADIUS["md"]
+        )
+        status_bar.pack(fill="x", padx=24, pady=(0, 8))
 
         self.site_label = ctk.CTkLabel(
             status_bar,
             text="Domain | الموقع: -",
-            font=("Segoe UI", 12),
-            text_color=("gray30", "#94A3B8")
+            font=ui_font(12),
+            text_color=M3["on_surface_variant"]
         )
         self.site_label.pack(side="left", padx=14, pady=6)
 
         self.files_label = ctk.CTkLabel(
             status_bar,
             text="Files | الملفات المكتشفة: 0",
-            font=("Segoe UI", 12, "bold"),
-            text_color=("#0284C7", "#38BDF8")
+            font=ui_font(12, "bold"),
+            text_color=M3["primary"]
         )
-        self.files_label.pack(side="left", padx=20, pady=6)
+        self.files_label.pack(side="left", padx=18, pady=6)
 
-        # Concurrency selector
         threads_label = ctk.CTkLabel(
             status_bar,
             text="Threads | التنزيلات التزامنية:",
-            font=("Segoe UI", 12),
-            text_color=("gray30", "#94A3B8")
+            font=ui_font(12),
+            text_color=M3["on_surface_variant"]
         )
-        threads_label.pack(side="right", padx=(5, 8))
-
         current_workers = str(self.settings.get("max_workers", 5))
         self.threads_menu = ctk.CTkOptionMenu(
             status_bar,
             values=["2", "3", "5", "8", "10"],
-            width=70,
+            width=74,
             height=28,
-            fg_color=("gray75", "#334155"),
-            button_color=("gray65", "#475569"),
-            button_hover_color=("gray55", "#64748B"),
+            corner_radius=14,
+            font=ui_font(11),
+            dropdown_font=ui_font(11),
+            fg_color=M3["surface_container_highest"],
+            button_color=M3["surface_container_high"],
+            button_hover_color=M3["outline_variant"],
+            text_color=M3["on_surface"],
+            dropdown_fg_color=M3["surface_container_high"],
+            dropdown_hover_color=M3["primary_container"],
+            dropdown_text_color=M3["on_surface"],
             command=self.on_threads_change
         )
         self.threads_menu.set(current_workers)
         self.threads_menu.pack(side="right", padx=(0, 12))
+        threads_label.pack(side="right", padx=(0, 8))
 
         # ----------------------------------
-        # Card 4: Action Triggers (Analyze, Download, Cancel)
+        # Card 4: Primary actions
         # ----------------------------------
         actions_frame = ctk.CTkFrame(self, fg_color="transparent")
-        actions_frame.pack(fill="x", padx=25, pady=(0, 8))
+        actions_frame.pack(fill="x", padx=24, pady=(0, 8))
 
-        # Analyze Button
-        self.analyze_btn = ctk.CTkButton(
+        self.analyze_btn = m3_button(
             actions_frame,
             text="Analyze | فحص الروابط",
+            variant="filled",
             image=self.icon_search,
-            height=40,
-            font=("Segoe UI", 13, "bold"),
-            fg_color="#4F46E5",
-            hover_color="#4338CA",
+            height=42,
+            font=ui_font(13, "bold"),
             command=self.analyze
         )
         self.analyze_btn.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        # Download Selected Button
-        self.download_btn = ctk.CTkButton(
+        self.download_btn = m3_button(
             actions_frame,
             text="Download Selected | بدء تنزيل المحدد",
+            variant="success",
             image=self.icon_download,
-            height=40,
-            font=("Segoe UI", 13, "bold"),
-            fg_color="#059669",
-            hover_color="#047857",
+            height=42,
+            font=ui_font(13, "bold"),
             command=self.start_download
         )
         self.download_btn.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        # Cancel Button
-        self.cancel_btn = ctk.CTkButton(
+        self.cancel_btn = m3_button(
             actions_frame,
             text="Cancel | الغاء",
+            variant="danger",
             image=self.icon_cancel,
-            width=110,
-            height=40,
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#DC2626",
-            hover_color="#B91C1C",
+            width=125,
+            height=42,
+            font=ui_font(12, "bold"),
             state="disabled",
             command=self.cancel_download
         )
         self.cancel_btn.pack(side="left")
 
         # ----------------------------------
-        # Card 5: Files Checklist Frame
+        # Card 5: Discovered files checklist
         # ----------------------------------
-        list_container = ctk.CTkFrame(self, corner_radius=10, fg_color=("gray90", "#1E222B"), border_color=("gray75", "#334155"), border_width=1)
-        list_container.pack(fill="x", padx=25, pady=(0, 8))
+        list_container = ctk.CTkFrame(
+            self,
+            fg_color=M3["surface_container_low"],
+            corner_radius=RADIUS["lg"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        list_container.pack(fill="x", padx=24, pady=(0, 8))
 
         list_header = ctk.CTkFrame(list_container, fg_color="transparent")
-        list_header.pack(fill="x", padx=12, pady=(8, 4))
+        list_header.pack(fill="x", padx=12, pady=(8, 3))
 
-        list_title = ctk.CTkLabel(
+        ctk.CTkLabel(
             list_header,
             text="Discovered Files | قائمة الملفات المكتشفة:",
-            font=("Segoe UI", 12, "bold")
-        )
-        list_title.pack(side="left")
+            font=ui_font(13, "bold"),
+            text_color=M3["on_surface"]
+        ).pack(side="left")
 
-        self.btn_deselect_all = ctk.CTkButton(
+        self.btn_deselect_all = m3_button(
             list_header,
             text="Deselect All | الغاء التحديد",
-            width=125,
-            height=26,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            variant="text",
+            width=140,
+            height=32,
+            font=ui_font(11),
             command=self.deselect_all_files
         )
         self.btn_deselect_all.pack(side="right", padx=(6, 0))
 
-        self.btn_select_all = ctk.CTkButton(
+        self.btn_select_all = m3_button(
             list_header,
             text="Select All | تحديد الكل",
-            width=110,
-            height=26,
-            font=("Segoe UI", 11),
-            fg_color=("gray75", "#334155"),
-            hover_color=("gray65", "#475569"),
-            text_color=("gray10", "white"),
+            variant="text",
+            width=125,
+            height=32,
+            font=ui_font(11),
             command=self.select_all_files
         )
         self.btn_select_all.pack(side="right")
 
-        # ----------------------------------
-        # Filter Bar (search + type pill toggles)
-        # ----------------------------------
+        # Filter bar (search + type chips)
         filter_bar = ctk.CTkFrame(list_container, fg_color="transparent")
-        filter_bar.pack(fill="x", padx=12, pady=(2, 4))
+        filter_bar.pack(fill="x", padx=12, pady=(2, 6))
 
-        self.filter_entry = ctk.CTkEntry(
+        self.filter_entry = m3_input(ctk.CTkEntry(
             filter_bar,
             placeholder_text="Search files... | بحث في الملفات...",
             width=260,
-            height=30,
-            font=("Segoe UI", 11),
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#334155"),
-            text_color=("gray10", "#F1F5F9"),
-            placeholder_text_color=("gray50", "#64748B"),
-            corner_radius=6
-        )
+            height=36,
+            font=ui_font(11),
+            text_color=M3["on_surface"],
+            placeholder_text_color=M3["on_surface_variant"]
+        ))
         self.filter_entry.pack(side="left", padx=(0, 10))
         self.filter_entry.bind("<KeyRelease>", self.filter_files)
 
-        # Type pill toggle buttons
-        pill_types = [("All | الكل", "ALL"), ("PDF", "PDF"), ("DOCX", "DOCX"),
-                      ("PPTX", "PPTX"), ("GDRIVE", "GDRIVE"), ("EPUB", "EPUB")]
-        inactive_fg = ("gray75", "#334155")
-        inactive_hover = ("gray65", "#475569")
-        inactive_text = ("gray10", "white")
+        pill_types = [
+            ("All | الكل", "ALL", 98),
+            ("PDF", "PDF", 80),
+            ("DOCX", "DOCX", 90),
+            ("PPTX", "PPTX", 88),
+            ("GDRIVE", "GDRIVE", 102),
+            ("EPUB", "EPUB", 82),
+        ]
 
         self.type_filter_buttons = {}
-        for label, type_key in pill_types:
-            btn = ctk.CTkButton(
+        self.type_filter_labels = {}
+        for label, type_key, chip_width in pill_types:
+            self.type_filter_labels[type_key] = label
+            btn = m3_button(
                 filter_bar,
                 text=label,
-                width=60 if type_key != "ALL" else 75,
-                height=26,
-                font=("Segoe UI", 10, "bold"),
-                fg_color=inactive_fg,
-                hover_color=inactive_hover,
-                text_color=inactive_text,
-                corner_radius=12,
+                variant="outlined",
+                width=chip_width,
+                height=34,
+                font=ui_font(11, "bold"),
+                corner_radius=17,
                 command=lambda tk=type_key: self._toggle_type_filter(tk)
             )
-            btn.pack(side="left", padx=2)
+            btn.pack(side="left", padx=3)
             self.type_filter_buttons[type_key] = btn
+        self._refresh_pill_styles()
 
-        self.scroll_files_frame = ctk.CTkScrollableFrame(list_container, height=220, fg_color=("white", "#12151C"))
-        self.scroll_files_frame.pack(fill="x", padx=10, pady=(0, 10))
+        self.scroll_files_frame = ctk.CTkScrollableFrame(
+            list_container,
+            height=175,
+            fg_color=M3["surface_container_lowest"],
+            corner_radius=RADIUS["md"],
+            border_color=M3["outline_variant"],
+            border_width=1
+        )
+        self.scroll_files_frame.pack(fill="x", padx=10, pady=(0, 8))
 
         self.placeholder_label = ctk.CTkLabel(
             self.scroll_files_frame,
             text="No files scanned yet. Click 'Analyze' to scan page(s). | لم يتم فحص اي روابط بعد.",
-            text_color=("gray50", "#64748B")
+            font=ui_font(11),
+            text_color=M3["on_surface_variant"]
         )
-        self.placeholder_label.pack(pady=20)
+        self.placeholder_label.pack(pady=24)
 
         # ----------------------------------
-        # Card 6: Progress Bar & Percentage
+        # Card 6: Overall progress
         # ----------------------------------
         progress_frame = ctk.CTkFrame(self, fg_color="transparent")
-        progress_frame.pack(fill="x", padx=25, pady=(2, 4))
+        progress_frame.pack(fill="x", padx=24, pady=(2, 4))
 
-        self.progress = ctk.CTkProgressBar(
+        self.progress = WavyProgressBar(
             progress_frame,
-            height=10,
-            progress_color="#10B981",
-            fg_color=("gray80", "#1E293B")
+            height=16,
+            progress_color=M3["primary"],
+            track_color=M3["outline_variant"],
+            surface_color=M3["surface"],
+            amplitude=3.0,
+            wavelength=38,
+            thickness=4.5,
+            speed=46.0,
         )
-        self.progress.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self.progress.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=2)
         self.progress.set(0)
 
         self.progress_label = ctk.CTkLabel(
             progress_frame,
             text="0%",
-            font=("Segoe UI", 11, "bold"),
-            width=45,
-            text_color=("#059669", "#10B981")
+            font=ui_font(11, "bold"),
+            width=48,
+            text_color=M3["primary"]
         )
         self.progress_label.pack(side="right")
 
         # ----------------------------------
-        # Card 7: Sleek Console Log Box
+        # Card 7: Console log
         # ----------------------------------
         self.log_box = ctk.CTkTextbox(
             self,
             font=("Consolas", 11),
             wrap="word",
-            fg_color=("white", "#12151C"),
-            border_color=("gray70", "#334155"),
-            text_color=("gray10", "#E2E8F0"),
+            fg_color=M3["surface_container_lowest"],
+            border_color=M3["outline_variant"],
+            text_color=M3["on_surface_variant"],
             border_width=1,
-            corner_radius=10
+            corner_radius=RADIUS["md"]
         )
-        self.log_box.pack(fill="both", expand=True, padx=25, pady=(0, 15))
+        self.log_box.pack(fill="both", expand=True, padx=24, pady=(0, 12))
 
     # ----------------------------------
     # Settings & Folder Operations
@@ -1379,6 +1589,14 @@ class App(ctk.CTk):
                 self.theme_btn.configure(image=self.icon_sun)
         save_settings(self.settings)
         self._apply_proxy(self.settings)
+
+        # Canvas-based wavy bars need an explicit repaint after theme switches.
+        try:
+            self.progress.refresh_theme()
+            for item in self.download_item_widgets.values():
+                item.progress_bar.set_surface(item.cget("fg_color"))
+        except Exception:
+            pass
 
     def bind_shortcuts(self):
         """Registers global keyboard shortcuts for power users."""
@@ -1501,6 +1719,19 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+    def destroy(self):
+        """Stops the tray icon before tearing down the Tk application."""
+        try:
+            if getattr(self, "_tray_icon", None):
+                self._tray_icon.stop()
+                self._tray_icon = None
+        except Exception:
+            pass
+        try:
+            super().destroy()
+        except Exception:
+            pass
+
     def _on_close_to_tray(self):
         if getattr(self, "_quitting", False):
             try:
@@ -1597,9 +1828,13 @@ class App(ctk.CTk):
         self.file_vars = {i: ctk.BooleanVar(value=True) for i in range(len(files))}
         self._displayed_indices = list(range(len(files)))
 
-        # Reset filter bar
+        # Reset filter bar (restore the placeholder that delete() removes)
         if self.filter_entry is not None:
             self.filter_entry.delete(0, "end")
+            try:
+                self.filter_entry._activate_placeholder()
+            except Exception:
+                pass
         self.active_type_filters = set()
         self._refresh_pill_styles()
 
@@ -1635,22 +1870,53 @@ class App(ctk.CTk):
         self._refresh_pill_styles()
         self.filter_files()
 
+    def _type_counts(self):
+        """Number of discovered files per type, used in the chip labels."""
+        counts = {}
+        for item in getattr(self, "files", None) or []:
+            file_type = str(item.get("type", "")).upper()
+            if file_type:
+                counts[file_type] = counts.get(file_type, 0) + 1
+        return counts
+
+    def _chip_label(self, type_key):
+        """Base bilingual label plus a live count for type chips."""
+        base = self.type_filter_labels.get(type_key, type_key)
+        if type_key == "ALL":
+            return base
+        count = self._type_counts().get(type_key, 0)
+        return f"{base} · {count}" if count else base
+
     def _refresh_pill_styles(self):
-        """Update pill button colors based on active_type_filters."""
-        inactive_fg = ("gray75", "#334155")
-        inactive_text = ("gray10", "white")
+        """Unified Material 3 filter-chip styling (no per-type colours)."""
         for type_key, btn in self.type_filter_buttons.items():
-            if type_key == "ALL":
-                if not self.active_type_filters:
-                    btn.configure(fg_color="#4F46E5", text_color="#FFFFFF")
+            selected = (
+                (type_key == "ALL" and not self.active_type_filters)
+                or (type_key != "ALL" and type_key in self.active_type_filters)
+            )
+            try:
+                btn.configure(
+                    text=self._chip_label(type_key),
+                    image=check_icon() if selected else None,
+                    compound="left",
+                )
+                if selected:
+                    btn.configure(
+                        fg_color=M3["secondary_container"],
+                        hover_color=M3["secondary_hover"],
+                        text_color=M3["on_secondary_container"],
+                        border_width=0,
+                    )
                 else:
-                    btn.configure(fg_color=inactive_fg, text_color=inactive_text)
-            else:
-                if type_key in self.active_type_filters:
-                    color = TYPE_COLORS.get(type_key, "#475569")
-                    btn.configure(fg_color=color, text_color="#FFFFFF")
-                else:
-                    btn.configure(fg_color=inactive_fg, text_color=inactive_text)
+                    btn.configure(
+                        fg_color="transparent",
+                        hover_color=M3["surface_container_high"],
+                        text_color=M3["on_surface_variant"],
+                        border_width=1,
+                        border_color=M3["outline_variant"],
+                    )
+            except Exception:
+                pass
 
     def filter_files(self, event=None):
         """Filter self.files by search text and active type filters, then redraw."""
@@ -1659,7 +1925,9 @@ class App(ctk.CTk):
 
         search_text = ""
         if self.filter_entry is not None:
-            search_text = self.filter_entry.get().strip().lower()
+            # Ignore the placeholder text; it is stored as real entry content.
+            if not getattr(self.filter_entry, "_placeholder_text_active", False):
+                search_text = self.filter_entry.get().strip().lower()
 
         filtered = []
         for i, item in enumerate(self.files):
@@ -1782,6 +2050,7 @@ class App(ctk.CTk):
                     self.is_working = False
 
                 elif event_type == "download_done":
+                    self.progress.stop()
                     self.analyze_btn.configure(state="normal")
                     self.download_btn.configure(state="normal", text="Download Selected | بدء تنزيل المحدد")
                     self.cancel_btn.configure(state="disabled")
@@ -1889,6 +2158,7 @@ class App(ctk.CTk):
         self.is_working = True
         self.analyze_btn.configure(state="disabled", text="Scanning... | جاري الفحص")
         self.download_btn.configure(state="disabled")
+        self.progress.stop()
         self.progress.set(0)
         self.progress_label.configure(text="0%")
 
@@ -1977,6 +2247,7 @@ class App(ctk.CTk):
         self.cancel_btn.configure(state="normal")
         self.progress.set(0)
         self.progress_label.configure(text="0%")
+        self.progress.start()
 
         threading.Thread(
             target=self._download_worker,
